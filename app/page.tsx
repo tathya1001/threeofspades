@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation"
 export default function Home() {
   const [name, setName] = useState("")
   const [roomId, setRoomId] = useState("")
-  const [numPlayers, setNumPlayers] = useState(3)
+  const [numPlayers, setNumPlayers] = useState(4)
   const [numDecks, setNumDecks] = useState(1)
   const router = useRouter()
 
