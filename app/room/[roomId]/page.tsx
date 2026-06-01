@@ -1,5 +1,5 @@
 "use client"
-import { useEffect, useState, useRef } from "react"
+import React, { useEffect, useState, useRef } from "react"
 import { socket } from "../../../lib/socket"
 import { useParams, useSearchParams } from "next/navigation"
 
@@ -16,6 +16,8 @@ interface RoomState {
     hostName: string
     targetPlayers: number
     numDecks: number
+    isCustomRule: boolean
+    maxPoints: number
     minBid: number
     numPartners: number
     partnerThresholds: PartnerThreshold[]
@@ -54,8 +56,8 @@ type SortMode = "suit" | "rank"
 const SUITS = [
     { value: "hearts", label: "Hearts", symbol: "♥", color: "text-[#e05555]", border: "border-[#e05555]" },
     { value: "diamonds", label: "Diamonds", symbol: "♦", color: "text-[#e05555]", border: "border-[#e05555]" },
-    { value: "clubs", label: "Clubs", symbol: "♣", color: "text-[#e8e3d8]", border: "border-[#e8e3d8]" },
-    { value: "spades", label: "Spades", symbol: "♠", color: "text-[#e8e3d8]", border: "border-[#e8e3d8]" },
+    { value: "clubs", label: "Clubs", symbol: "♣", color: "text-[#3E3A35]", border: "border-[#3E3A35]" },
+    { value: "spades", label: "Spades", symbol: "♠", color: "text-[#3E3A35]", border: "border-[#3E3A35]" },
 ]
 
 // Ascending value order: 2 < 3 < … < K < A
@@ -66,8 +68,8 @@ const SUIT_SORT_ORDER = ["S", "D", "C", "H"]
 const SUIT_META: Record<string, { symbol: string; color: string }> = {
     H: { symbol: "♥", color: "#e05555" },
     D: { symbol: "♦", color: "#e05555" },
-    C: { symbol: "♣", color: "#e8e3d8" },
-    S: { symbol: "♠", color: "#e8e3d8" },
+    C: { symbol: "♣", color: "#3E3A35" },
+    S: { symbol: "♠", color: "#3E3A35" },
 }
 
 const SUIT_OPTIONS = [
@@ -108,7 +110,6 @@ const CARD_H = 101
 // Max 6 turning cards possible, pre-allocate slots
 const MAX_TURNING_CARDS = 6
 const MAX_HAND_DISPLAY_WIDTH = 640
-const MAX_POINTS = 500
 const TOTAL_HANDS = 16
 
 const DEFAULT_ROOM: RoomState = {
@@ -117,6 +118,8 @@ const DEFAULT_ROOM: RoomState = {
     hostName: "",
     targetPlayers: 7,
     numDecks: 1,
+    isCustomRule: false,
+    maxPoints: 250,
     minBid: 110,
     numPartners: 1,
     partnerThresholds: [],
@@ -210,7 +213,7 @@ function getOvalPositions(n: number) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function CardHand({ cards, selectedCard, onSelectCard }: { cards: string[]; selectedCard?: string | null; onSelectCard?: (card: string) => void }) {
+function CardHand({ cards, selectedCard, onSelectCard, opacity = 1 }: { cards: string[]; selectedCard?: string | null; onSelectCard?: (card: string) => void; opacity?: number }) {
     const n = cards.length
     if (n === 0) return null
     const naturalWidth = n * CARD_W + (n - 1) * 4
@@ -218,7 +221,7 @@ function CardHand({ cards, selectedCard, onSelectCard }: { cards: string[]; sele
     const step = n > 1 ? Math.min(CARD_W + 4, (containerWidth - CARD_W) / (n - 1)) : CARD_W
 
     return (
-        <div className="relative mx-auto" style={{ width: `${containerWidth}px`, height: `${CARD_H}px` }}>
+        <div className="relative mx-auto" style={{ width: `${containerWidth}px`, height: `${CARD_H}px`, opacity }}>
             {cards.map((card, i) => {
                 const isSelected = selectedCard === card
                 return (
@@ -235,8 +238,8 @@ function CardHand({ cards, selectedCard, onSelectCard }: { cards: string[]; sele
                             className="block select-none rounded-md"
                             style={{
                                 width: `${CARD_W}px`, height: `${CARD_H}px`,
-                                boxShadow: isSelected ? "0 0 20px rgba(198,172,255,0.6), 0 4px 16px rgba(0,0,0,0.7)" : "0 4px 16px rgba(0,0,0,0.7)",
-                                outline: isSelected ? "2px solid rgba(198,172,255,0.7)" : "none",
+                                boxShadow: isSelected ? "0 0 20px rgba(20,58,108,0.3), 0 4px 16px rgba(0,0,0,0.15)" : "0 4px 16px rgba(0,0,0,0.15)",
+                                outline: isSelected ? "2px solid rgba(20,58,108,0.8)" : "none",
                                 borderRadius: "6px",
                             }}
                             onError={(e) => {
@@ -247,8 +250,8 @@ function CardHand({ cards, selectedCard, onSelectCard }: { cards: string[]; sele
                                     const pc = parseCard(card)
                                     const fb = document.createElement("div")
                                     fb.className = "card-fallback absolute inset-0 rounded-lg flex flex-col items-center justify-center gap-0.5"
-                                    fb.style.cssText = "background:#1c1c2e;border:1.5px solid rgba(255,255,255,0.12);box-shadow:0 2px 8px rgba(0,0,0,0.55);"
-                                    fb.innerHTML = `<span style="color:${pc.color};font-size:20px;line-height:1">${pc.symbol}</span><span style="color:rgba(255,255,255,0.6);font-size:13px;font-weight:600">${pc.value}</span>`
+                                    fb.style.cssText = "background:#FDFCFB;border:1.5px solid #D8D3C5;box-shadow:0 2px 8px rgba(0,0,0,0.1);"
+                                    fb.innerHTML = `<span style="color:${pc.color};font-size:20px;line-height:1">${pc.symbol}</span><span style="color:rgba(0,0,0,0.6);font-size:13px;font-weight:600">${pc.value}</span>`
                                     par.appendChild(fb)
                                 }
                             }}
@@ -325,6 +328,7 @@ export default function Room() {
     const [selectedCard, setSelectedCard] = useState<string | null>(null)
     const [showTrickPopup, setShowTrickPopup] = useState(false)
     const [isCustomizing, setIsCustomizing] = useState(false)
+    const [cardOpacity, setCardOpacity] = useState(1.0)
 
     // Turning card selections: array of { suit, rank, priority } — pre-allocated to MAX_TURNING_CARDS
     const [turningSelections, setTurningSelections] = useState<{ suit: string; rank: string; priority: string }[]>(
@@ -396,7 +400,7 @@ export default function Room() {
     const canConfirm = !!selectedSuit && allTCDone
 
     const HAND_H = CARD_H + 40     // card height + label + padding
-    const CONTROL_W = 160             // right control panel width
+    const CONTROL_W = 210             // right control panel width
 
     const redMembers = room.players.filter(p => room.playerTeams?.[p.id] === "red")
     const blueMembers = room.players.filter(p => room.playerTeams?.[p.id] === "blue")
@@ -445,11 +449,11 @@ export default function Room() {
         : "Someone"
 
     return (
-        <div className="flex w-screen h-screen bg-[#111] text-[#e8e3d8] overflow-hidden">
+        <div className="flex w-screen h-screen bg-[#FAF7F2] text-[#2D2A26] overflow-hidden">
             <style>{`
                 @keyframes pulse-glow {
-                    0%,100%{box-shadow:0 0 0 0 rgba(120,180,255,0.6);}
-                    70%{box-shadow:0 0 0 10px rgba(120,180,255,0);}
+                    0%,100%{box-shadow:0 0 0 0 rgba(20,58,108,0.4);}
+                    70%{box-shadow:0 0 0 10px rgba(20,58,108,0);}
                 }
                 .animate-pulse-glow{animation:pulse-glow 1.6s ease-out infinite;}
                 @keyframes deal-in{
@@ -458,29 +462,69 @@ export default function Room() {
                 }
                 .animate-deal-in{animation:deal-in 0.4s cubic-bezier(.22,1,.36,1) both;}
                 .card-select{
-                    appearance:none;background:rgba(255,255,255,0.04);
-                    border:1px solid rgba(255,255,255,0.18);border-radius:8px;
-                    padding:6px 8px;color:#e8e3d8;font-family:inherit;
+                    appearance:none;background:#FDFCFB;
+                    border:1px solid #D8D3C5;border-radius:8px;
+                    padding:6px 8px;color:#2D2A26;font-family:inherit;
                     font-size:14px;width:100%;cursor:pointer;outline:none;
                 }
-                .card-select:focus{border-color:rgba(255,255,255,0.4);}
-                .card-select option{background:#1a1a2e;color:#e8e3d8;}
+                .card-select:focus{border-color:#143A6C;}
+                .card-select option{background:#FAF7F2;color:#2D2A26;}
+                .vertical-slider {
+                    -webkit-appearance: none;
+                    appearance: none;
+                    background: rgba(0, 0, 0, 0.08);
+                    border-radius: 4px;
+                    outline: none;
+                    transition: background 0.2s;
+                }
+                .vertical-slider:hover {
+                    background: rgba(0, 0, 0, 0.12);
+                }
+                .vertical-slider::-webkit-slider-thumb {
+                    -webkit-appearance: none;
+                    appearance: none;
+                    width: 14px;
+                    height: 14px;
+                    border-radius: 50%;
+                    background: #143A6C;
+                    cursor: pointer;
+                    box-shadow: 0 0 10px rgba(20,58,108,0.3);
+                    transition: transform 0.1s, background-color 0.1s;
+                }
+                .vertical-slider::-webkit-slider-thumb:hover {
+                    background: #1E4E8A;
+                    transform: scale(1.15);
+                }
+                .vertical-slider::-moz-range-thumb {
+                    width: 14px;
+                    height: 14px;
+                    border: none;
+                    border-radius: 50%;
+                    background: #143A6C;
+                    cursor: pointer;
+                    box-shadow: 0 0 10px rgba(20,58,108,0.3);
+                    transition: transform 0.1s, background-color 0.1s;
+                }
+                .vertical-slider::-moz-range-thumb:hover {
+                    background: #1E4E8A;
+                    transform: scale(1.15);
+                }
             `}</style>
 
             {/* ── LEFT PANEL ────────────────────────────────────────────── */}
-            <aside className="w-[252px] min-w-[252px] h-full flex flex-col p-5 border-r border-white/10 bg-white/[0.018] z-10 overflow-y-auto">
+            <aside className="w-[252px] min-w-[252px] h-full flex flex-col p-5 border-r border-[#E5E0D5] bg-[#F3EFE6] z-10 overflow-y-auto">
 
                 <div className="mb-[18px]">
-                    <div className="text-[13px] text-[#e8e3d8]/40 tracking-wider mb-0.5">room</div>
+                    <div className="text-[13px] text-[#8E8980] tracking-wider mb-0.5">room</div>
                     <div className="text-[22px] font-bold tracking-wide leading-tight">{roomId}</div>
-                    <div className={`inline-block mt-1.5 text-[12px] tracking-[0.1em] uppercase rounded px-2 py-0.5 border ${room.phase === "waiting" ? "text-white/40 border-white/15" :
-                        room.phase === "bidding" ? "text-blue-400 border-blue-400/30" :
-                            room.phase === "trump-selection" ? "text-orange-400 border-orange-400/30" :
-                                "text-green-400 border-green-400/30"
+                    <div className={`inline-block mt-1.5 text-[12px] tracking-[0.1em] uppercase rounded px-2 py-0.5 border ${room.phase === "waiting" ? "text-[#7A756E] border-[#D8D3C5] bg-[#FAF7F2]" :
+                        room.phase === "bidding" ? "text-blue-700 border-blue-300/40 bg-blue-50" :
+                            room.phase === "trump-selection" ? "text-orange-700 border-orange-300/40 bg-orange-50" :
+                                "text-green-700 border-green-300/40 bg-green-50"
                         }`}>{room.phase}</div>
                 </div>
 
-                <div className="w-full h-px bg-white/10 mb-3" />
+                <div className="w-full h-px bg-[#E5E0D5] mb-3" />
 
                 {isCustomizing ? (
                     <div className="flex flex-col gap-3">
@@ -494,10 +538,10 @@ export default function Room() {
                                         onClick={() => !isTaken && socket.emit("update-color", { roomId, color })}
                                         disabled={isTaken}
                                         className={`relative w-full flex items-center justify-center aspect-square rounded-[14px] border-2 transition-all duration-200 ${room.playerColors?.[effectiveMyId] === color
-                                            ? "border-white/90 scale-105 shadow-[0_0_14px_rgba(255,255,255,0.25)] z-10"
+                                            ? "border-[#143A6C] scale-105 shadow-[0_0_14px_rgba(20,58,108,0.25)] z-10"
                                             : isTaken
                                                 ? "border-transparent opacity-30 grayscale-[0.6] cursor-not-allowed"
-                                                : "border-transparent opacity-60 hover:opacity-100 hover:scale-105 hover:border-white/30 cursor-pointer"
+                                                : "border-transparent opacity-60 hover:opacity-100 hover:scale-105 hover:border-black/30 cursor-pointer"
                                             }`}
                                         style={{ backgroundColor: color }}
                                     >
@@ -507,9 +551,9 @@ export default function Room() {
                             })}
                         </div>
 
-                        <div className="w-full h-px bg-white/10 my-2" />
+                        <div className="w-full h-px bg-[#E5E0D5] my-2" />
 
-                        <div className="text-[13px] text-[#e8e3d8]/40 mb-1">choose dress</div>
+                        <div className="text-[13px] text-[#8E8980] mb-1">choose dress</div>
                         <div className="grid grid-cols-3 gap-3">
                             {AVATAR_DRESSES.map(dress => {
                                 const isSelected = (room.playerDresses?.[effectiveMyId] || "default") === dress.id;
@@ -517,22 +561,22 @@ export default function Room() {
                                     <button
                                         key={dress.id}
                                         onClick={() => socket.emit("update-dress", { roomId, dress: dress.id })}
-                                        className={`relative w-full flex items-center justify-center aspect-square rounded-[14px] border-2 transition-all duration-200 bg-white/5 ${isSelected
-                                            ? "border-white/90 scale-105 shadow-[0_0_14px_rgba(255,255,255,0.25)] z-10"
-                                            : "border-transparent opacity-60 hover:opacity-100 hover:scale-105 hover:border-white/30 cursor-pointer"
+                                        className={`relative w-full flex items-center justify-center aspect-square rounded-[14px] border-2 transition-all duration-200 bg-[#FAF7F2] ${isSelected
+                                            ? "border-[#143A6C] scale-105 shadow-[0_0_14px_rgba(20,58,108,0.25)] z-10"
+                                            : "border-transparent opacity-60 hover:opacity-100 hover:scale-105 hover:border-black/20 cursor-pointer"
                                             }`}
                                     >
-                                        <AvatarIcon dress={dress.id} color={room.playerColors?.[effectiveMyId] || "#e8e3d8"} size={40} />
+                                        <AvatarIcon dress={dress.id} color={room.playerColors?.[effectiveMyId] || "#2D2A26"} size={40} />
                                     </button>
                                 );
                             })}
                         </div>
 
 
-                        <div className="w-full h-px bg-white/10 my-2" />
+                        <div className="w-full h-px bg-[#E5E0D5] my-2" />
                         <button
                             onClick={() => setIsCustomizing(false)}
-                            className="w-full py-2.5 border border-white/20 rounded-lg text-white/80 text-lg font-bold hover:bg-white/10 transition-colors"
+                            className="w-full py-2.5 border border-[#D8D3C5] rounded-lg text-[#2D2A26] text-lg font-bold hover:bg-[#FAF7F2] transition-colors cursor-pointer"
                         >
                             Done
                         </button>
@@ -540,42 +584,47 @@ export default function Room() {
                 ) : (
                     <>
                         {/* ══ WAITING ═══════════════════════════════════════════════ */}
+                        {room.phase === "waiting" && room.isCustomRule && (
+                            <div className="mb-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[#143A6C]/30 bg-[#143A6C]/8">
+                                <span className="text-[12px] font-bold text-[#143A6C]/80 tracking-wider uppercase">custom rules</span>
+                            </div>
+                        )}
                         {room.phase === "waiting" && (
                             <div className="flex flex-col gap-2.5">
                                 {isHost && (
                                     <button
                                         onClick={giveCards}
-                                        disabled={room.players.length < 2}
-                                        className={`w-full py-2.5 rounded-lg text-[1.1rem] font-bold transition-all ${room.cardsDealt
-                                            ? "border border-green-500/40 text-green-400/70 bg-green-500/10 cursor-default"
-                                            : "border border-[#e05555]/60 text-[#e05555]/80 hover:bg-[#e05555]/10 disabled:opacity-20"
+                                        disabled={room.players.length !== room.targetPlayers}
+                                        className={`w-full py-2.5 rounded-lg text-[1.1rem] font-bold transition-all cursor-pointer ${room.cardsDealt
+                                            ? "border border-green-500/30 text-green-700 bg-green-50/50 cursor-default"
+                                            : "border border-red-500/40 text-red-600 bg-red-50 hover:bg-red-100/50 disabled:opacity-20"
                                             }`}
                                     >
                                         {room.cardsDealt ? "✓ Cards Dealt" : "Give Cards"}
                                     </button>
                                 )}
                                 {!isHost && room.cardsDealt && (
-                                    <div className="text-[13px] text-green-400/70 border border-green-500/20 rounded-lg px-3 py-2 bg-green-500/5 text-center">
+                                    <div className="text-[13px] text-green-700 border border-green-500/20 rounded-lg px-3 py-2 bg-green-50 text-center font-semibold">
                                         ✓ Cards dealt
                                     </div>
                                 )}
 
-                                <div className="w-full h-px bg-white/10 my-1" />
+                                <div className="w-full h-px bg-[#E5E0D5] my-1" />
 
                                 {([["players", `${room.players.length} / ${room.targetPlayers}`],
                                 ["decks", String(room.numDecks)],
                                 ["min bid", String(room.minBid)],
                                 ] as [string, string][]).map(([label, val]) => (
                                     <div key={label} className="flex justify-between items-center">
-                                        <span className="text-[13px] text-[#e8e3d8]/40">{label}</span>
+                                        <span className="text-[13px] text-[#8E8980]">{label}</span>
                                         <span className="text-xl font-semibold">{val}</span>
                                     </div>
                                 ))}
 
                                 {room.partnerThresholds.length > 0 && (
                                     <>
-                                        <div className="w-full h-px bg-white/10 my-1" />
-                                        <div className="text-[13px] text-[#e8e3d8]/40 mb-1">partner thresholds</div>
+                                        <div className="w-full h-px bg-[#E5E0D5] my-1" />
+                                        <div className="text-[13px] text-[#8E8980] mb-1">partner thresholds</div>
                                         <PartnerLadder thresholds={room.partnerThresholds} currentBid={room.minBid} />
                                     </>
                                 )}
@@ -585,13 +634,13 @@ export default function Room() {
                                         <button
                                             onClick={startBidding}
                                             disabled={needsMore !== 0 || !room.cardsDealt}
-                                            className="w-full py-3 border border-white/50 rounded-lg text-white/80 font-bold text-xl hover:bg-white/5 disabled:opacity-20 transition-all"
+                                            className="w-full py-3 border border-[#143A6C]/50 rounded-lg text-[#143A6C] font-bold text-xl hover:bg-[#143A6C]/5 disabled:opacity-20 transition-all cursor-pointer"
                                         >
                                             {needsMore > 0 ? `need ${needsMore} more` : !room.cardsDealt ? "deal cards first" : "start bidding"}
                                         </button>
                                     ) : (
-                                        <p className="text-white/30 text-base italic leading-relaxed">
-                                            waiting for <span className="text-white/50">{room.hostName || "host"}</span> to start...
+                                        <p className="text-[#8E8980] text-base italic leading-relaxed">
+                                            waiting for <span className="text-[#2D2A26] font-semibold">{room.hostName || "host"}</span> to start...
                                         </p>
                                     )}
                                 </div>
@@ -602,24 +651,24 @@ export default function Room() {
                         {room.phase === "bidding" && (
                             <div className="flex flex-col gap-3">
                                 <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                                    {([["max pts", String(MAX_POINTS)], ["hands", String(TOTAL_HANDS)]] as [string, string][]).map(([l, v]) => (
+                                    {([["max pts", String(room.maxPoints || 250)], ["hands", String(TOTAL_HANDS)]] as [string, string][]).map(([l, v]) => (
                                         <div key={l} className="flex flex-col">
-                                            <span className="text-[12px] text-[#e8e3d8]/40">{l}</span>
+                                            <span className="text-[12px] text-[#8E8980]">{l}</span>
                                             <span className="text-[22px] font-bold leading-tight">{v}</span>
                                         </div>
                                     ))}
                                 </div>
 
-                                <div className="w-full h-px bg-white/10" />
+                                <div className="w-full h-px bg-[#E5E0D5]" />
 
                                 <div>
-                                    <div className="text-[13px] text-[#e8e3d8]/40">highest bid</div>
+                                    <div className="text-[13px] text-[#8E8980]">highest bid</div>
                                     <div className="flex items-baseline gap-2 mt-0.5">
-                                        <span className={`font-bold leading-none ${room.highestBidderId ? "text-4xl text-[#c6acff]" : "text-2xl text-white/40"}`}>
+                                        <span className={`font-bold leading-none ${room.highestBidderId ? "text-4xl text-[#143A6C]" : "text-2xl text-[#8E8980]/50"}`}>
                                             {room.highestBidderId ? room.highestBid : `Start: ${room.minBid}`}
                                         </span>
                                         {room.highestBidderName && (
-                                            <span className="text-sm text-white/40">by {room.highestBidderName}</span>
+                                            <span className="text-sm text-[#8E8980]">by {room.highestBidderName}</span>
                                         )}
                                     </div>
                                 </div>
@@ -631,10 +680,10 @@ export default function Room() {
                                     />
                                 )}
 
-                                <div className="w-full h-px bg-white/10" />
+                                <div className="w-full h-px bg-[#E5E0D5]" />
 
                                 {iHaveForfeited ? (
-                                    <p className="text-white/30 text-lg italic">you forfeited.</p>
+                                    <p className="text-[#8E8980] text-lg italic">you forfeited.</p>
                                 ) : (
                                     <div className="flex flex-col gap-2.5">
                                         <div className="grid grid-cols-2 gap-2">
@@ -643,7 +692,7 @@ export default function Room() {
                                                     key={inc}
                                                     onClick={() => placeBid(inc)}
                                                     disabled={!isMyTurn}
-                                                    className="py-2.5 border border-white/30 rounded-lg text-[#e8e3d8]/80 text-xl font-semibold hover:bg-white/5 disabled:opacity-10 transition-colors"
+                                                    className="py-2.5 border border-[#D8D3C5] rounded-lg text-[#2D2A26] bg-[#FDFCFB] text-xl font-semibold hover:bg-[#EBE7DC] disabled:opacity-10 transition-colors cursor-pointer"
                                                 >
                                                     +{inc}
                                                 </button>
@@ -652,12 +701,12 @@ export default function Room() {
                                         <button
                                             onClick={forfeitBid}
                                             disabled={!canForfeit}
-                                            className="w-full py-2.5 border border-red-500/50 rounded-lg text-red-500/70 text-xl font-bold hover:bg-red-500/10 disabled:opacity-20 transition-colors"
+                                            className="w-full py-2.5 border border-red-500/40 rounded-lg text-red-600 bg-red-50 font-bold hover:bg-red-100 disabled:opacity-20 transition-colors cursor-pointer"
                                         >
                                             Forfeit
                                         </button>
                                         {!atLeastOneBid && (
-                                            <p className="text-[12px] text-white/20">someone must bid before forfeiting</p>
+                                            <p className="text-[12px] text-red-500/80 -mt-1 text-center">someone must bid before forfeiting</p>
                                         )}
                                     </div>
                                 )}
@@ -668,26 +717,26 @@ export default function Room() {
                         {room.phase === "trump-selection" && (
                             <div className="flex flex-col gap-3">
                                 <div>
-                                    <div className="text-[13px] text-[#e8e3d8]/40">bid won</div>
-                                    <div className="text-3xl font-bold text-[#c6acff] leading-none">{room.highestBid}</div>
-                                    <div className="text-sm text-white/40 mt-0.5">
+                                    <div className="text-[13px] text-[#8E8980]">bid won</div>
+                                    <div className="text-3xl font-bold text-[#143A6C] leading-none">{room.highestBid}</div>
+                                    <div className="text-sm text-[#8E8980] mt-0.5">
                                         by {selectorPlayer?.name || "…"} · {room.numPartners} partner{room.numPartners !== 1 ? "s" : ""}
                                     </div>
                                 </div>
 
-                                <div className="w-full h-px bg-white/10" />
+                                <div className="w-full h-px bg-[#E5E0D5]" />
 
                                 {isSelector ? (
                                     <div className="flex flex-col gap-3.5">
                                         {/* Trump suit */}
                                         <div>
-                                            <div className="text-[13px] text-[#e8e3d8]/40 mb-2">choose trump</div>
+                                            <div className="text-[13px] text-[#8E8980] mb-2">choose trump</div>
                                             <div className="flex flex-col gap-1.5">
                                                 {SUITS.map(suit => (
                                                     <button
                                                         key={suit.value}
                                                         onClick={() => setSelectedSuit(suit.value)}
-                                                        className={`flex items-center gap-3 p-2 rounded-lg border text-lg font-semibold transition-all ${selectedSuit === suit.value ? `bg-white/10 ${suit.border}` : "border-white/20"
+                                                        className={`flex items-center gap-3 p-2 rounded-lg border text-lg font-semibold transition-all cursor-pointer ${selectedSuit === suit.value ? `bg-[#FAF7F2]/60 ${suit.border} shadow-[0_2px_8px_rgba(20,58,108,0.1)]` : "border-[#D8D3C5]"
                                                             } ${suit.color}`}
                                                     >
                                                         <span className="text-2xl">{suit.symbol}</span>
@@ -697,18 +746,18 @@ export default function Room() {
                                             </div>
                                         </div>
 
-                                        <div className="w-full h-px bg-white/10" />
+                                        <div className="w-full h-px bg-[#E5E0D5]" />
 
                                         {/* Turning cards — count = numTurningCards = numPartners */}
                                         <div>
-                                            <div className="text-[13px] text-[#e8e3d8]/40 mb-2">
+                                            <div className="text-[13px] text-[#8E8980] mb-2">
                                                 turning cards
-                                                <span className="ml-1.5 text-[#c6acff]/70">×{numTC}</span>
+                                                <span className="ml-1.5 text-[#143A6C]/70 font-semibold">×{numTC}</span>
                                             </div>
                                             <div className="flex flex-col gap-2.5">
                                                 {Array.from({ length: numTC }, (_, idx) => (
                                                     <div key={idx} className="flex gap-1.5 items-center">
-                                                        <span className="text-[12px] text-white/25 w-4 shrink-0">{idx + 1}</span>
+                                                        <span className="text-[12px] text-[#8E8980]/50 w-4 shrink-0">{idx + 1}</span>
                                                         <select
                                                             value={turningSelections[idx]?.suit ?? ""}
                                                             onChange={e => setTurningCard(idx, "suit", e.target.value)}
@@ -750,20 +799,20 @@ export default function Room() {
                                         <button
                                             onClick={confirmTrump}
                                             disabled={!canConfirm}
-                                            className="w-full py-2.5 border border-blue-400/40 rounded-lg text-blue-400/70 text-xl font-bold hover:bg-blue-400/10 disabled:opacity-20 transition-colors"
+                                            className="w-full py-2.5 border border-[#143A6C]/40 rounded-lg text-[#143A6C] bg-[#143A6C]/5 text-xl font-bold hover:bg-[#143A6C]/10 disabled:opacity-20 transition-colors cursor-pointer"
                                         >
                                             Set Cards
                                         </button>
 
                                         {!selectedSuit
-                                            ? <p className="text-[12px] text-white/20 -mt-1">pick a trump suit first</p>
+                                            ? <p className="text-[12px] text-red-500/80 -mt-1 text-center">pick a trump suit first</p>
                                             : !allTCDone
-                                                ? <p className="text-[12px] text-white/20 -mt-1">fill all {numTC} turning card{numTC > 1 ? "s" : ""}{needsPriority ? " (incl. priority)" : ""}</p>
+                                                ? <p className="text-[12px] text-red-500/80 -mt-1 text-center">fill all {numTC} turning card{numTC > 1 ? "s" : ""}{needsPriority ? " (incl. priority)" : ""}</p>
                                                 : null}
                                     </div>
                                 ) : (
-                                    <p className="text-white/30 text-base italic">
-                                        waiting for <span className="text-white/50">{selectorPlayer?.name || "…"}</span> to set cards...
+                                    <p className="text-[#8E8980] text-base italic leading-relaxed">
+                                        waiting for <span className="text-[#2D2A26] font-semibold">{selectorPlayer?.name || "…"}</span> to set cards...
                                     </p>
                                 )}
                             </div>
@@ -774,34 +823,34 @@ export default function Room() {
                             <div className="flex flex-col gap-3.5">
                                 {trumpSuitData && (
                                     <div>
-                                        <div className="text-[13px] text-[#e8e3d8]/40 mb-1">trump suit</div>
-                                        <div className={`flex items-center gap-2.5 p-3 border rounded-xl bg-white/5 ${trumpSuitData.border}`}>
+                                        <div className="text-[13px] text-[#8E8980] mb-1">trump suit</div>
+                                        <div className={`flex items-center gap-2.5 p-3 border rounded-xl bg-[#FAF7F2]/60 ${trumpSuitData.border}`}>
                                             <span className={`text-4xl leading-none ${trumpSuitData.color}`}>{trumpSuitData.symbol}</span>
                                             <span className={`text-xl font-bold ${trumpSuitData.color}`}>{trumpSuitData.label}</span>
                                         </div>
                                     </div>
                                 )}
 
-                                <div className="flex justify-between items-center">
+                                <div className="flex justify-between items-center text-[#2D2A26]">
                                     <div>
-                                        <div className="text-[13px] text-[#e8e3d8]/40">hand</div>
+                                        <div className="text-[13px] text-[#8E8980]">hand</div>
                                         <div className="text-2xl font-bold">{room.handNumber}</div>
                                     </div>
                                     <div>
-                                        <div className="text-[13px] text-[#e8e3d8]/40">bid</div>
-                                        <div className="text-2xl font-bold text-[#c6acff]">{room.highestBid}</div>
+                                        <div className="text-[13px] text-[#8E8980]">bid</div>
+                                        <div className="text-2xl font-bold text-[#143A6C]">{room.highestBid}</div>
                                     </div>
                                     <div className="text-right">
-                                        <div className="text-[13px] text-[#e8e3d8]/40">partners</div>
+                                        <div className="text-[13px] text-[#8E8980]">partners</div>
                                         <div className="text-2xl font-bold">{room.numPartners}</div>
                                     </div>
                                 </div>
 
                                 {room.turningCards.length > 0 && (
                                     <>
-                                        <div className="w-full h-px bg-white/10" />
+                                        <div className="w-full h-px bg-[#E5E0D5]" />
                                         <div>
-                                            <div className="text-[13px] text-[#e8e3d8]/40 mb-2">turning cards</div>
+                                            <div className="text-[13px] text-[#8E8980] mb-2">turning cards</div>
                                             <div className="flex flex-wrap gap-2">
                                                 {room.turningCards.map((card, i) => (
                                                     <TurningCardBadge key={`${card}-${i}`} card={card} />
@@ -811,7 +860,7 @@ export default function Room() {
                                     </>
                                 )}
 
-                                <div className="w-full h-px bg-white/10" />
+                                <div className="w-full h-px bg-[#E5E0D5]" />
 
                                 {/* Scoreboard */}
                                 <div>
@@ -820,41 +869,41 @@ export default function Room() {
                                         <div>
                                             <div className="flex justify-between items-end mb-1.5">
                                                 <div>
-                                                    <div className="text-[11px] text-[#e05555] opacity-80 font-bold tracking-wider uppercase">red team</div>
-                                                    <div className="text-[20px] font-bold text-[#e05555] mt-0.5">{getTeamPts("red")} <span className="text-[13px] font-normal text-white/40">/ {MAX_POINTS}</span></div>
+                                                    <div className="text-[11px] text-red-600 opacity-90 font-bold tracking-wider uppercase">red team</div>
+                                                    <div className="text-[20px] font-bold text-red-600 mt-0.5">{getTeamPts("red")} <span className="text-[13px] font-normal text-[#8E8980]">/ {room.maxPoints || 250}</span></div>
                                                 </div>
                                                 <div className="text-right">
-                                                    <div className="text-[11px] text-[#e05555] opacity-80 font-bold tracking-wider uppercase">hands</div>
+                                                    <div className="text-[11px] text-red-600 opacity-90 font-bold tracking-wider uppercase">hands</div>
                                                     <div className="text-lg font-bold">{getTeamTrks("red")}</div>
                                                 </div>
                                             </div>
                                             <div className="flex flex-wrap gap-2 mt-2">
                                                 {redMembers.map(p => (
-                                                    <div key={p.id} className={`flex items-center justify-center w-[30px] h-[30px] rounded ${room.players[room.currentPlayerIndex]?.id === p.id ? "ring-1 ring-white/70" : ""}`} title={p.name}>
-                                                        <AvatarIcon dress={room.playerDresses?.[p.id]} color={room.playerColors?.[p.id] || "#e8e3d8"} size={28} />
+                                                    <div key={p.id} className={`flex items-center justify-center w-[30px] h-[30px] rounded ${room.players[room.currentPlayerIndex]?.id === p.id ? "ring-1 ring-[#143A6C]" : ""}`} title={p.name}>
+                                                        <AvatarIcon dress={room.playerDresses?.[p.id]} color={room.playerColors?.[p.id] || "#2D2A26"} size={28} />
                                                     </div>
                                                 ))}
                                             </div>
                                         </div>
 
-                                        <div className="w-full h-px bg-white/10" />
+                                        <div className="w-full h-px bg-[#E5E0D5]" />
 
                                         {/* Blue Team */}
                                         <div>
                                             <div className="flex justify-between items-end mb-1.5">
                                                 <div>
-                                                    <div className="text-[11px] text-[#5588e0] opacity-80 font-bold tracking-wider uppercase">blue team</div>
-                                                    <div className="text-[20px] font-bold text-[#5588e0] mt-0.5">{getTeamPts("blue")} <span className="text-[13px] font-normal text-white/40">/ {MAX_POINTS}</span></div>
+                                                    <div className="text-[11px] text-blue-600 opacity-90 font-bold tracking-wider uppercase">blue team</div>
+                                                    <div className="text-[20px] font-bold text-blue-600 mt-0.5">{getTeamPts("blue")} <span className="text-[13px] font-normal text-[#8E8980]">/ {room.maxPoints || 250}</span></div>
                                                 </div>
                                                 <div className="text-right">
-                                                    <div className="text-[11px] text-[#5588e0] opacity-80 font-bold tracking-wider uppercase">hands</div>
+                                                    <div className="text-[11px] text-blue-600 opacity-90 font-bold tracking-wider uppercase">hands</div>
                                                     <div className="text-lg font-bold">{getTeamTrks("blue")}</div>
                                                 </div>
                                             </div>
                                             <div className="flex flex-wrap gap-2 mt-2">
                                                 {blueMembers.map(p => (
-                                                    <div key={p.id} className={`flex items-center justify-center w-[30px] h-[30px] rounded ${room.players[room.currentPlayerIndex]?.id === p.id ? "ring-1 ring-white/70" : ""}`} title={p.name}>
-                                                        <AvatarIcon dress={room.playerDresses?.[p.id]} color={room.playerColors?.[p.id] || "#e8e3d8"} size={28} />
+                                                    <div key={p.id} className={`flex items-center justify-center w-[30px] h-[30px] rounded ${room.players[room.currentPlayerIndex]?.id === p.id ? "ring-1 ring-[#143A6C]" : ""}`} title={p.name}>
+                                                        <AvatarIcon dress={room.playerDresses?.[p.id]} color={room.playerColors?.[p.id] || "#2D2A26"} size={28} />
                                                     </div>
                                                 ))}
                                             </div>
@@ -863,9 +912,9 @@ export default function Room() {
                                 </div>
 
                                 {room.gameOver && (
-                                    <div className="border border-green-400/40 bg-green-400/10 rounded-lg px-3 py-2.5 text-center">
-                                        <div className="text-green-400 font-bold text-lg">Game Over</div>
-                                        <div className="text-[13px] text-white/50 mt-1">All cards played</div>
+                                    <div className="border border-green-500/30 bg-green-50 rounded-lg px-3 py-2.5 text-center">
+                                        <div className="text-green-700 font-bold text-lg">Game Over</div>
+                                        <div className="text-[13px] text-[#8E8980] mt-1 font-semibold">All cards played</div>
                                     </div>
                                 )}
                             </div>
@@ -876,17 +925,17 @@ export default function Room() {
                 {/* Footer avatar */}
                 {!isCustomizing && (
                     <div className="mt-auto pt-4 shrink-0">
-                        <div className="w-full h-px bg-white/10 mb-4" />
-                        <div className="flex items-center justify-between bg-white/[0.03] border border-white/10 rounded-xl p-3">
+                        <div className="w-full h-px bg-[#E5E0D5] mb-4" />
+                        <div className="flex items-center justify-between bg-[#FAF7F2] border border-[#E5E0D5] rounded-xl p-3">
                             <div className="flex items-center gap-3">
-                                <AvatarIcon dress={room.playerDresses?.[effectiveMyId]} color={room.playerColors?.[effectiveMyId] || "#e8e3d8"} size={40} />
-                                <span className="font-semibold text-[15px] truncate max-w-[80px] text-[#c6acff]">
+                                <AvatarIcon dress={room.playerDresses?.[effectiveMyId]} color={room.playerColors?.[effectiveMyId] || "#2D2A26"} size={40} />
+                                <span className="font-semibold text-[15px] truncate max-w-[80px] text-[#143A6C]">
                                     {myName || "You"}
                                 </span>
                             </div>
                             <button
                                 onClick={() => setIsCustomizing(true)}
-                                className="px-3 py-1.5 rounded-lg border border-white/20 text-[12px] font-bold text-white/70 hover:bg-white/10 hover:text-white transition-all"
+                                className="px-3 py-1.5 rounded-lg border border-[#D8D3C5] text-[12px] font-bold text-[#2D2A26] hover:bg-[#F3EFE6] transition-all cursor-pointer"
                             >
                                 Customize
                             </button>
@@ -900,12 +949,12 @@ export default function Room() {
 
                 {/* Table + players */}
                 <div className="relative flex-1 overflow-hidden">
-                    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[74%] h-[70%] border border-white/5 rounded-[50%] pointer-events-none" />
+                    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[74%] h-[70%] border border-[#E5E0D5]/70 rounded-[50%] pointer-events-none" />
                     {/* Inner oval for played cards */}
                     {room.phase === "playing" && (
-                        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[36%] h-[34%] border border-dashed border-white/8 rounded-[50%] pointer-events-none" />
+                        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[36%] h-[34%] border border-dashed border-[#E5E0D5]/90 rounded-[50%] pointer-events-none" />
                     )}
-                    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white/5 text-sm tracking-[0.3em] uppercase pointer-events-none select-none">
+                    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-black/[0.03] text-sm tracking-[0.3em] uppercase pointer-events-none select-none">
                         {roomId}
                     </div>
 
@@ -928,7 +977,7 @@ export default function Room() {
                                     alt={entry.card}
                                     draggable={false}
                                     className="block select-none rounded"
-                                    style={{ width: "52px", height: "73px", boxShadow: "0 2px 12px rgba(0,0,0,0.6)" }}
+                                    style={{ width: "52px", height: "73px", boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}
                                     onError={(e) => {
                                         const t = e.currentTarget as HTMLImageElement
                                         t.style.display = "none"
@@ -936,8 +985,8 @@ export default function Room() {
                                         if (par && !par.querySelector(".card-fallback")) {
                                             const fb = document.createElement("div")
                                             fb.className = "card-fallback rounded flex flex-col items-center justify-center gap-0.5"
-                                            fb.style.cssText = `width:52px;height:73px;background:#1c1c2e;border:1.5px solid rgba(255,255,255,0.12);`
-                                            fb.innerHTML = `<span style="color:${pc.color};font-size:16px;line-height:1">${pc.symbol}</span><span style="color:rgba(255,255,255,0.6);font-size:11px;font-weight:600">${pc.value}</span>`
+                                            fb.style.cssText = `width:52px;height:73px;background:#FDFCFB;border:1.5px solid #D8D3C5;box-shadow:0 2px 8px rgba(0,0,0,0.1);`
+                                            fb.innerHTML = `<span style="color:${pc.color};font-size:16px;line-height:1">${pc.symbol}</span><span style="color:rgba(0,0,0,0.6);font-size:11px;font-weight:600">${pc.value}</span>`
                                             par.appendChild(fb)
                                         }
                                     }}
@@ -967,42 +1016,46 @@ export default function Room() {
                                 style={{ left: `${pos.x}%`, top: `${pos.y}%`, transform: "translate(-50%, -50%)" }}
                             >
                                 <div
-                                    className={`shrink-0 transition-all ${(isCurrentBidder || isCurrentPlayTurn) ? "drop-shadow-[0_0_12px_rgba(255,255,255,0.5)] animate-pulse-glow" : "drop-shadow-[0_2px_6px_rgba(0,0,0,0.5)]"}`}
+                                    className={`shrink-0 transition-all ${(isCurrentBidder || isCurrentPlayTurn) ? "drop-shadow-[0_0_12px_rgba(20,58,108,0.4)] animate-pulse-glow" : "drop-shadow-[0_2px_6px_rgba(0,0,0,0.15)]"}`}
                                 >
-                                    <AvatarIcon dress={room.playerDresses?.[player.id]} color={room.playerColors?.[player.id] || "#e8e3d8"} size={54} />
+                                    <AvatarIcon dress={room.playerDresses?.[player.id]} color={room.playerColors?.[player.id] || "#2D2A26"} size={54} />
                                 </div>
 
                                 <div
-                                    className={`text-[16px] text-center whitespace-nowrap tracking-wide drop-shadow-md transition-all ${isMe ? "scale-105" : ""}`}
-                                    style={{ color: room.playerColors?.[player.id] || "#e8e3d8" }}
+                                    className={`text-[16px] text-center whitespace-nowrap tracking-wide drop-shadow-sm transition-all ${isMe ? "scale-105" : ""}`}
+                                    style={{ color: room.playerColors?.[player.id] || "#2D2A26" }}
                                 >
                                     {displayName}
                                     {isPlayerHost && <span className="text-xs ml-1 opacity-50">(host)</span>}
                                 </div>
 
-                                {room.cardsDealt && !isMe && cardCount > 0 && (
-                                    <div className="text-[11px] text-white/25">{cardCount} cards</div>
-                                )}
+                                {room.phase === "playing" ? (
+                                    <div className="text-[14px] text-[#8E8980] font-semibold tracking-wide mt-0.5">
+                                        ({playerPts}/{playerTricks})
+                                    </div>
+                                ) : (
+                                    <>
+                                        {room.cardsDealt && !isMe && cardCount > 0 && (
+                                            <div className="text-[11px] text-[#8E8980]">{cardCount} cards</div>
+                                        )}
 
-                                <div className="min-h-[24px] flex items-center justify-center">
-                                    {isCurrentBidder && !hasForfeited ? (
-                                        <span className="text-[13px] text-blue-400 border border-blue-400/60 bg-blue-400/20 rounded px-2 py-px font-semibold animate-pulse">bidding...</span>
-                                    ) : hasForfeited ? (
-                                        <span className="text-[13px] text-white/25 border border-white/25 bg-white/5 rounded px-2 py-px">forfeit</span>
-                                    ) : isHighestBidder && room.phase !== "waiting" && room.phase !== "playing" ? (
-                                        <span className="text-[13px] text-green-400 border border-green-400/70 bg-green-400/10 rounded px-2 py-px font-bold">{room.highestBid}</span>
-                                    ) : room.phase === "playing" ? (
-                                        <span className="text-[12px] text-white/35 tabular-nums">
-                                            {playerTricks}t · {playerPts}pts
-                                        </span>
-                                    ) : null}
-                                </div>
+                                        <div className="min-h-[24px] flex items-center justify-center">
+                                            {isCurrentBidder && !hasForfeited ? (
+                                                <span className="text-[13px] text-blue-700 border border-blue-400/40 bg-blue-50 rounded px-2 py-px font-semibold animate-pulse">bidding...</span>
+                                            ) : hasForfeited ? (
+                                                <span className="text-[13px] text-[#8E8980] border border-[#D8D3C5] bg-[#FAF7F2] rounded px-2 py-px">forfeit</span>
+                                            ) : isHighestBidder && room.phase !== "waiting" ? (
+                                                <span className="text-[13px] text-green-700 border border-green-500/40 bg-green-50 rounded px-2 py-px font-bold">{room.highestBid}</span>
+                                            ) : null}
+                                        </div>
+                                    </>
+                                )}
                             </div>
                         )
                     })}
 
                     {room.players.length === 0 && (
-                        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white/20 text-2xl tracking-wide">
+                        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[#8E8980]/50 text-2xl tracking-wide font-bold">
                             waiting for players...
                         </div>
                     )}
@@ -1011,37 +1064,36 @@ export default function Room() {
                     {room.phase === "playing" && room.trickPending && showTrickPopup && (
                         <div className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none">
                             <div
-                                className="pointer-events-auto flex flex-col items-center gap-4 px-10 py-7 rounded-2xl border border-white/15 relative"
+                                className="pointer-events-auto flex flex-col items-center gap-4 px-10 py-7 rounded-2xl border border-[#D8D3C5] relative"
                                 style={{
-                                    background: "rgba(15,15,25,0.82)",
+                                    background: "rgba(253,252,251,0.85)",
                                     backdropFilter: "blur(18px)",
                                     WebkitBackdropFilter: "blur(18px)",
-                                    boxShadow: "0 8px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06)",
+                                    boxShadow: "0 8px 48px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.02)",
                                 }}
                             >
                                 <button
                                     onClick={() => setShowTrickPopup(false)}
-                                    className="absolute top-3 right-4 text-white/40 hover:text-white transition-colors text-xl font-bold cursor-pointer"
+                                    className="absolute top-3 right-4 text-[#8E8980] hover:text-[#2D2A26] transition-colors text-xl font-bold cursor-pointer"
                                     aria-label="Close"
                                 >
                                     ✕
                                 </button>
-                                <div className="text-[13px] tracking-[0.2em] uppercase text-white/35">hand won</div>
+                                <div className="text-[13px] tracking-[0.2em] uppercase text-[#8E8980]">hand won</div>
                                 <div
-                                    className="text-3xl drop-shadow-[0_0_18px_rgba(255,255,255,0.15)] text-center"
-                                    style={{ color: "#ffffff66" }}
+                                    className="text-3xl drop-shadow-[0_0_18px_rgba(0,0,0,0.05)] text-center text-[#2D2A26]"
                                 >
-                                    <span className="font-bold" style={{ color: room.playerColors?.[room.lastTrickWinner || ""] || "#ffffff88" }}>{trickWinnerName}</span> won the hand
+                                    <span className="font-bold" style={{ color: room.playerColors?.[room.lastTrickWinner || ""] || "#2D2A26" }}>{trickWinnerName}</span> won the hand
                                 </div>
                                 {isHost ? (
                                     <button
                                         onClick={nextHand}
-                                        className="mt-1 px-8 py-2.5 rounded-xl border border-green-400/50 text-green-400 text-lg font-bold bg-green-400/10 hover:bg-green-400/20 transition-all active:scale-95"
+                                        className="mt-1 px-8 py-2.5 rounded-xl border border-green-600/40 text-green-700 text-lg font-bold bg-green-50 hover:bg-green-100 transition-all active:scale-95 cursor-pointer"
                                     >
                                         Next Round →
                                     </button>
                                 ) : (
-                                    <div className="text-[13px] text-white/30 italic">waiting for host to start next round…</div>
+                                    <div className="text-[13px] text-[#8E8980]/80 italic">waiting for host to start next round…</div>
                                 )}
                             </div>
                         </div>
@@ -1051,56 +1103,92 @@ export default function Room() {
                 {/* ── BOTTOM STRIP: hand + right control panel ────────── */}
                 {showHand && (
                     <div
-                        className="animate-deal-in flex flex-row border-t border-white/[0.07]"
+                        className="animate-deal-in flex flex-row border-t border-[#E5E0D5]"
                         style={{ flexShrink: 0 }}
                     >
                         {/* ── Hand area ── */}
-                        <div className="flex-1 flex flex-col items-center justify-centre pb-4 pt-2 bg-[#0d0d0d] overflow-hidden">
-                            <div className="text-[11px] text-white/20 tracking-[0.2em] uppercase mb-2">
+                        <div className="flex-1 flex flex-col items-center justify-centre pb-4 pt-2 bg-[#F3EFE6] overflow-hidden">
+                            <div className="text-[11px] text-[#8E8980] tracking-[0.2em] uppercase mb-2">
                                 your hand · {myCards.length} cards
                             </div>
-                            <CardHand cards={myCards} selectedCard={selectedCard} onSelectCard={(c) => setSelectedCard(prev => prev === c ? null : c)} />
+                            <CardHand cards={myCards} selectedCard={selectedCard} onSelectCard={(c) => setSelectedCard(prev => prev === c ? null : c)} opacity={cardOpacity} />
                         </div>
 
                         {/* ── Right control panel ── */}
                         <div
-                            className="flex flex-col justify-between gap-1.5 border-l border-white/10 bg-white/[0.018] px-3 py-3 shrink-0"
+                            className="flex flex-row gap-3 border-l border-[#E5E0D5] bg-[#EBE7DC] px-3 py-3 shrink-0"
                             style={{ width: `${CONTROL_W}px` }}
                         >
-                            {/* Sort mode toggle */}
-                            <div className="flex flex-col gap-1.5">
-                                <div className="text-[11px] text-white/30 tracking-wider uppercase mb-0.5">sort</div>
-                                <button
-                                    onClick={() => setSortMode("suit")}
-                                    className={`w-full py-1.5 rounded-lg border text-[14px] font-semibold transition-all ${sortMode === "suit"
-                                        ? "border-[#c6acff]/50 text-[#c6acff] bg-[#c6acff]/8"
-                                        : "border-white/15 text-white/40 hover:border-white/30 hover:text-white/60"
-                                        }`}
-                                >
-                                    ♠♦♣♥ by suit
-                                </button>
-                                <button
-                                    onClick={() => setSortMode("rank")}
-                                    className={`w-full py-1.5 rounded-lg border text-[14px] font-semibold transition-all ${sortMode === "rank"
-                                        ? "border-[#c6acff]/50 text-[#c6acff] bg-[#c6acff]/8"
-                                        : "border-white/15 text-white/40 hover:border-white/30 hover:text-white/60"
-                                        }`}
-                                >
-                                    2→A by rank
-                                </button>
+                            {/* Left Column: Vertical opacity slider */}
+                            <div className="flex flex-col items-center justify-between w-8 select-none py-1 border-r border-[#D8D3C5] pr-2.5">
+                                {/* Eye Symbol */}
+                                <div className="text-[#8E8980] hover:text-[#143A6C] transition-colors cursor-pointer" title="Card Opacity">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                                    </svg>
+                                </div>
+
+                                {/* Slider Wrapper */}
+                                <div className="h-[90px] w-6 flex items-center justify-center relative my-2">
+                                    <input
+                                        type="range"
+                                        min="0.05"
+                                        max="1"
+                                        step="0.05"
+                                        value={cardOpacity}
+                                        onChange={(e) => setCardOpacity(parseFloat(e.target.value))}
+                                        className="absolute w-[90px] cursor-pointer vertical-slider"
+                                        style={{
+                                            transform: "rotate(-90deg)",
+                                            height: "6px",
+                                            margin: 0,
+                                        }}
+                                    />
+                                </div>
+
+                                <span className="text-[10px] text-[#8E8980] font-mono tabular-nums leading-none">
+                                    {Math.round(cardOpacity * 100)}%
+                                </span>
                             </div>
 
-                            {/* Play Card button */}
-                            <button
-                                onClick={playCard}
-                                disabled={!canPlayCard}
-                                className={`w-full py-2 rounded-lg border text-[15px] font-bold transition-all ${canPlayCard
-                                    ? "border-green-400/50 text-green-400 bg-green-400/10 hover:bg-green-400/20 cursor-pointer"
-                                    : "border-white/20 text-white/30 cursor-not-allowed"
-                                    }`}
-                            >
-                                {room.gameOver ? "Game Over" : isMyPlayTurn ? (selectedCard ? "Play Card" : "Select a Card") : "Waiting..."}
-                            </button>
+                            {/* Right Column: Existing control panel content */}
+                            <div className="flex-1 flex flex-col justify-between gap-1.5">
+                                {/* Sort mode toggle */}
+                                <div className="flex flex-col gap-1.5">
+                                    <div className="text-[11px] text-[#7A756E] tracking-wider uppercase mb-0.5">sort</div>
+                                    <button
+                                        onClick={() => setSortMode("suit")}
+                                        className={`w-full py-1.5 rounded-lg border text-[14px] font-semibold transition-all cursor-pointer ${sortMode === "suit"
+                                            ? "border-[#143A6C]/50 text-[#143A6C] bg-[#143A6C]/8"
+                                            : "border-[#D8D3C5] text-[#8E8980] hover:border-[#143A6C]/40 hover:text-[#143A6C]"
+                                            }`}
+                                    >
+                                        ♠♦♣♥ by suit
+                                    </button>
+                                    <button
+                                        onClick={() => setSortMode("rank")}
+                                        className={`w-full py-1.5 rounded-lg border text-[14px] font-semibold transition-all cursor-pointer ${sortMode === "rank"
+                                            ? "border-[#143A6C]/50 text-[#143A6C] bg-[#143A6C]/8"
+                                            : "border-[#D8D3C5] text-[#8E8980] hover:border-[#143A6C]/40 hover:text-[#143A6C]"
+                                            }`}
+                                    >
+                                        2→A by rank
+                                    </button>
+                                </div>
+
+                                {/* Play Card button */}
+                                <button
+                                    onClick={playCard}
+                                    disabled={!canPlayCard}
+                                    className={`w-full py-2 rounded-lg border text-[15px] font-bold transition-all ${canPlayCard
+                                        ? "border-green-400/50 text-green-400 bg-green-400/10 hover:bg-green-400/20 cursor-pointer"
+                                        : "border-white/20 text-white/30 cursor-not-allowed"
+                                        }`}
+                                >
+                                    {room.gameOver ? "Game Over" : isMyPlayTurn ? (selectedCard ? "Play Card" : "Select a Card") : "Waiting..."}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 )}

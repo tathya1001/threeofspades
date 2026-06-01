@@ -12,28 +12,12 @@ const { randomUUID } = require("crypto")
 
 let rooms = {}
 
-// ─── Partner / Turning-Card Threshold Logic ───────────────────────────────────
-//
-// columns labelled 1–6 represent TEAM SIZE (1+partners).
-// Column n → numPartners = n-1 → numTurningCards = n-1
-//
-//   base         = MROUND(250 / numPlayers, 10)   ← round-half-away-from-zero
-//   threshold(n) = base*n + 30          (1 deck, n ≥ 2)
-//   threshold(n) = (base*n + 30) * 2    (2 decks, n ≥ 2)
-//
-// minBid = threshold(2) = 1-partner threshold (smallest valid bid).
-// numTurningCards = numPartners, and both update live as bids climb.
-//
-// MAX_N = max column index per player count:
-//   3→2  4→2  5→3  6→4  7→5  8→5  9→6  10→6
-
 const MAX_N = { 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5, 9: 6, 10: 6 }
 
 function mround(value, multiple) {
     return Math.floor(value / multiple + 0.5) * multiple
 }
 
-// Returns [ { partners: N, threshold: T }, … ] starting at 1 partner (minBid)
 function getPartnerThresholds(numPlayers, numDecks) {
     const base = mround(250 / numPlayers, 10)
     const maxN = MAX_N[numPlayers] ?? 3
@@ -47,12 +31,10 @@ function getPartnerThresholds(numPlayers, numDecks) {
     return result
 }
 
-// minBid = first entry's threshold (1 partner)
 function getMinBid(numPlayers, numDecks) {
     return getPartnerThresholds(numPlayers, numDecks)[0]?.threshold ?? 90
 }
 
-// How many partners (= turning cards) does this bid earn? Minimum 1.
 function getNumPartnersForBid(bid, numPlayers, numDecks) {
     const thresholds = getPartnerThresholds(numPlayers, numDecks)
     let partners = 1
@@ -69,21 +51,19 @@ const CARD_VALUES = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q",
 // Rank order for trick comparison (higher index = stronger)
 const RANK_ORDER = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"]
 
-// Trump suit name → suit letter mapping
+// Trump suit name then suit letter mapping
 const TRUMP_SUIT_MAP = { hearts: "H", diamonds: "D", clubs: "C", spades: "S" }
 
 function getCardPoints(card) {
     const rank = card.slice(0, -1)
     const suit = card.slice(-1)
-    if (rank === "3" && suit === "S") return 30  // 3♠ special
+    if (rank === "3" && suit === "S") return 30
     if (["A", "K", "Q", "J", "T"].includes(rank)) return 10
     if (rank === "5") return 5
     return 0
 }
 
 function determineTrickWinner(trick, trumpSuitLetter) {
-    // trick = [{ playerId, card }, ...]
-    // When two cards have the same rank & suit (multi-deck), the LAST one played wins.
     const leadSuit = trick[0].card.slice(-1)
     let bestIdx = 0
     let bestIsTrump = trick[0].card.slice(-1) === trumpSuitLetter
@@ -104,7 +84,7 @@ function determineTrickWinner(trick, trumpSuitLetter) {
             // Both following lead suit — higher or equal rank wins (last played wins ties)
             if (rank >= bestRank) { bestIdx = i; bestRank = rank }
         }
-        // If not trump and not lead suit → cannot win
+        // If not trump and not lead suit then cannot win
     }
     return trick[bestIdx]
 }
@@ -169,8 +149,25 @@ io.on("connection", (socket) => {
         const hostName = typeof payload === "string" ? payload : payload?.name ?? ""
         const targetPlayers = payload?.numPlayers || 7
         const numDecks = payload?.numDecks || 1
-        const minBid = getMinBid(targetPlayers, numDecks)
-        const partnerThresholds = getPartnerThresholds(targetPlayers, numDecks)
+        const isCustomRule = !!payload?.isCustomRule
+        const maxPoints = numDecks === 2 ? 500 : 250
+
+        let minBid, partnerThresholds
+
+        if (isCustomRule && payload.customMinBid && payload.customPartnerThresholds) {
+            // Use host-supplied custom rules
+            minBid = payload.customMinBid
+            // Filter out disabled entries and validate
+            partnerThresholds = payload.customPartnerThresholds
+                .filter(t => !t.disabled)
+                .map(t => ({ partners: t.partners, threshold: t.threshold }))
+                .sort((a, b) => a.threshold - b.threshold)
+        } else {
+            // Standard computed rules
+            minBid = getMinBid(targetPlayers, numDecks)
+            partnerThresholds = getPartnerThresholds(targetPlayers, numDecks)
+        }
+
         const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         const roomId = Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * 36)]).join("")
 
@@ -180,6 +177,8 @@ io.on("connection", (socket) => {
             hostName,
             targetPlayers,
             numDecks,
+            isCustomRule,
+            maxPoints,
             minBid,
             numPartners: 1,            // starts at 1 (minBid level)
             partnerThresholds,
@@ -201,7 +200,7 @@ io.on("connection", (socket) => {
             playerDresses: {},
         }
 
-        console.log(`Room ${roomId} | "${hostName}" | ${targetPlayers}p ${numDecks}d | minBid:${minBid} | thresholds:${JSON.stringify(partnerThresholds)}`)
+        console.log(`Room ${roomId} | "${hostName}" | ${targetPlayers}p ${numDecks}d | ${isCustomRule ? "CUSTOM" : "standard"} | minBid:${minBid} | maxPts:${maxPoints} | thresholds:${JSON.stringify(partnerThresholds)}`)
         callback(roomId)
     })
 
@@ -311,7 +310,7 @@ io.on("connection", (socket) => {
         const requester = room.players.find(p => p.id === socket.id)
         if (!requester) return
         if (room.hostId !== socket.id && requester.name !== room.hostName) return
-        if (room.players.length < 2) return
+        if (room.players.length !== room.targetPlayers) return
 
         let deck = []
         for (let d = 0; d < room.numDecks; d++) deck = deck.concat(generateDeck())
@@ -463,7 +462,7 @@ io.on("connection", (socket) => {
             room.playerTeams[p.id] = (p.id === room.highestBidderId) ? "red" : "blue"
         })
 
-        console.log(`${roomId} → trump:${suit} turning:[${turningCards}]${multiDeck ? ` priorities:[${priorities}]` : ''} partners:${room.numPartners}`)
+        console.log(`${roomId} then trump:${suit} turning:[${turningCards}]${multiDeck ? ` priorities:[${priorities}]` : ''} partners:${room.numPartners}`)
         io.to(roomId).emit("room-update", room)
     })
 
@@ -509,7 +508,7 @@ io.on("connection", (socket) => {
                     }
                 }
             } else {
-                // Single deck: first (and only) play of this card → partner
+                // Single deck: first (and only) play of this card then partner
                 room.playerTeams[socket.id] = "red"
             }
         }
@@ -544,7 +543,7 @@ io.on("connection", (socket) => {
             room.trickPending = true
             room.handNumber++
 
-            console.log(`${roomId} → trick #${room.handNumber - 1} won by ${winner.playerId} (+${trickPoints}pts) [pending]`)
+            console.log(`${roomId} then trick #${room.handNumber - 1} won by ${winner.playerId} (+${trickPoints}pts) [pending]`)
         } else {
             // Advance to next player clockwise
             room.currentPlayerIndex = (room.currentPlayerIndex + 1) % room.players.length
@@ -568,7 +567,7 @@ io.on("connection", (socket) => {
         if (totalCards === 0) {
             room.gameOver = true
             room.trickPending = false
-            console.log(`${roomId} → GAME OVER | points: ${JSON.stringify(room.playerPoints)}`)
+            console.log(`${roomId} then GAME OVER | points: ${JSON.stringify(room.playerPoints)}`)
         } else {
             // Clear the completed trick and resume
             room.currentTrick = []
