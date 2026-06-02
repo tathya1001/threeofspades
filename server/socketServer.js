@@ -118,6 +118,7 @@ function safeRoom(room) {
     room.playerTricks = room.playerTricks || {}
     room.playerPoints = room.playerPoints || {}
     room.handNumber = room.handNumber || 0
+    room.totalHand = room.totalHand || 0
     room.gameOver = room.gameOver || false
     room.trickPending = room.trickPending || false
     room.playerColors = room.playerColors || {}
@@ -168,8 +169,8 @@ io.on("connection", (socket) => {
             partnerThresholds = getPartnerThresholds(targetPlayers, numDecks)
         }
 
-        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-        const roomId = Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * 36)]).join("")
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        const roomId = Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * 26)]).join("")
 
         rooms[roomId] = {
             players: [],
@@ -180,7 +181,7 @@ io.on("connection", (socket) => {
             isCustomRule,
             maxPoints,
             minBid,
-            numPartners: 1,            // starts at 1 (minBid level)
+            numPartners: 1,
             partnerThresholds,
             counter: 0,
             phase: "waiting",
@@ -195,6 +196,7 @@ io.on("connection", (socket) => {
             playerCards: {},
             turningCards: [],
             numTurningCards: 1,            // = numPartners, updates live
+            totalHand: 0,
             playerColors: {},
             playerTeams: {},
             playerDresses: {},
@@ -274,9 +276,9 @@ io.on("connection", (socket) => {
 
         if (!room.playerColors[socket.id]) {
             const colors = [
-                "#FF4242", "#FFCA3A", "#8AC926", "#6EDDFF",
-                "#FF5BD3", "#434DFF", "#FF8019", "#71FCD0",
-                "#AE4AFF", "#F31F6A", "#e7ff32", "#ebebeb"
+                "#F14E4E", "#F2B616", "#7ABF0C", "#37C3EE",
+                "#F95DCF", "#3C45DD", "#FA7E1A", "#2BD49F",
+                "#901BEF", "#BF0043", "#537818", "#545454"
             ]
 
             const usedColors = Object.values(room.playerColors)
@@ -322,6 +324,7 @@ io.on("connection", (socket) => {
             room.playerCards[p.id] = deck.slice(i * cpp, (i + 1) * cpp)
         })
         room.cardsDealt = true
+        room.totalHand = cpp
         room.turningCards = []
 
         console.log(`Cards dealt in ${roomId}: ${cpp}/player`)

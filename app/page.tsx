@@ -4,8 +4,6 @@ import { useState, useEffect, useCallback } from "react"
 import { socket } from "../lib/socket"
 import { useRouter } from "next/navigation"
 
-// ─── Threshold defaults (mirrors server logic) ──────────────────────────────
-
 const MAX_N: Record<number, number> = { 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5, 9: 6, 10: 6 }
 
 function mround(value: number, multiple: number) {
@@ -145,7 +143,7 @@ export default function Home() {
     for (let v = 50; v <= maxPoints; v += 5) minBidOptions.push(v)
 
     return (
-        <div className="min-h-screen bg-[#FAF7F2] text-[#2D2A26] flex items-center justify-center p-6 relative overflow-x-hidden overflow-y-auto">
+        <div className="min-h-screen bg-[#F3EFE6] text-[#2D2A26] flex items-center justify-center p-6 relative overflow-x-hidden overflow-y-auto">
             <style>{`
                 @keyframes bg-scroll {
                     0%   { background-position-x: 0; }
@@ -170,10 +168,10 @@ export default function Home() {
                     transition: all 0.2s ease;
                 }
                 .custom-select:focus {
-                    border-color: #143A6C;
+                    border-color: #CE670E;
                 }
                 .custom-select option {
-                    background: #FAF7F2;
+                    background: #F3EFE6;
                     color: #2D2A26;
                 }
 
@@ -206,7 +204,7 @@ export default function Home() {
                     -webkit-appearance: none;
                     appearance: none;
                     margin-top: -6px;
-                    background-color: #143A6C;
+                    background-color: #CE670E;
                     height: 16px;
                     width: 16px;
                     border-radius: 50%;
@@ -237,7 +235,7 @@ export default function Home() {
 
                 input[type="range"]::-moz-range-thumb {
                     border: none;
-                    background-color: #143A6C;
+                    background-color: #CE670E;
                     height: 16px;
                     width: 16px;
                     border-radius: 50%;
@@ -255,7 +253,7 @@ export default function Home() {
             `}</style>
 
             {/* Background carousel */}
-            <div
+            {/* <div
                 style={{
                     position: "absolute",
                     inset: 0,
@@ -264,27 +262,27 @@ export default function Home() {
                     backgroundSize: "auto 100%",
                     backgroundPosition: "center",
                     animation: "bg-scroll 90s linear infinite",
-                    opacity: 0.08,
+                    opacity: 0.8,
                     pointerEvents: "none",
                     zIndex: 0,
                 }}
-            />
+            /> */}
 
-            <div className="w-full max-w-[560px] border border-[#EBE7DC] rounded-[28px] p-8 sm:p-12 flex flex-col items-center relative z-10 transition-all duration-300">
+            <div className="w-full max-w-[560px] rounded-[28px] p-8 sm:p-12 flex flex-col items-center relative z-10 transition-all duration-300">
 
                 {/* ═══ SCREEN 1: LANDING/MENU ═══ */}
                 {screen === "menu" && (
                     <>
                         <h1 className="text-[3.6rem] text-[#2D2A26] font-bold mb-8 text-center tracking-wide leading-none">
-                            Three of Spades
+                            KINGS and <br /> REBELS
                         </h1>
 
                         <div className="w-full max-w-[360px] flex flex-col gap-2.5 mb-8">
-                            <label className="text-[1.1rem] text-[#8E8980] uppercase tracking-widest text-center font-bold">
+                            {/* <label className="text-[1.1rem] text-[#8E8980] uppercase tracking-widest text-center font-bold">
                                 Your Name
-                            </label>
+                            </label> */}
                             <input
-                                className="w-full bg-[#FAF7F2] border border-[#D8D3C5] rounded-[12px] px-5 py-3.5 text-center text-[1.5rem] text-[#2D2A26] outline-none focus:border-[#143A6C] focus:ring-1 focus:ring-[#143A6C] transition-all placeholder:text-[#8E8980]/40 font-semibold"
+                                className="w-full bg-[#F3EFE6] border border-[#D8D3C5] rounded-[12px] px-5 py-3.5 text-center text-[1.5rem] text-[#2D2A26] outline-none focus:border-[#CE670E] focus:ring-1 focus:ring-[#CE670E] transition-all placeholder:text-[#8E8980]/40 font-semibold"
                                 placeholder="Enter name"
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
@@ -300,7 +298,7 @@ export default function Home() {
                             <button
                                 onClick={() => setScreen("host")}
                                 disabled={!name.trim()}
-                                className="flex-1 py-4 px-5 rounded-[16px] border border-[#143A6C]/30 text-[#143A6C] bg-[#143A6C]/5 font-bold text-[1.35rem] hover:bg-[#143A6C]/10 hover:border-[#143A6C] active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer flex flex-col items-center justify-center gap-1 shadow-xs hover:shadow-md"
+                                className="flex-1 py-4 px-5 rounded-[16px] border border-[#CE670E]/30 text-[#CE670E] bg-[#CE670E]/5 font-bold text-[1.35rem] hover:bg-[#CE670E]/10 hover:border-[#CE670E] active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer flex flex-col items-center justify-center gap-1 shadow-xs hover:shadow-md"
                             >
                                 <span>Host Game</span>
                                 {/* <span className="text-[0.85rem] text-[#8E8980] font-normal tracking-wide">Create lobby</span> */}
@@ -308,7 +306,7 @@ export default function Home() {
                             <button
                                 onClick={() => setScreen("join")}
                                 disabled={!name.trim()}
-                                className="flex-1 py-4 px-5 rounded-[16px] border border-[#143A6C]/30 text-[#143A6C] bg-[#143A6C]/5 font-bold text-[1.35rem] hover:bg-[#143A6C]/10 hover:border-[#143A6C] active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer flex flex-col items-center justify-center gap-1 shadow-xs hover:shadow-md"
+                                className="flex-1 py-4 px-5 rounded-[16px] border border-[#CE670E]/30 text-[#CE670E] bg-[#CE670E]/5 font-bold text-[1.35rem] hover:bg-[#CE670E]/10 hover:border-[#CE670E] active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer flex flex-col items-center justify-center gap-1 shadow-xs hover:shadow-md"
                             >
                                 <span>Join Game</span>
                                 {/* <span className="text-[0.85rem] text-[#8E8980] font-normal tracking-wide">Enter code</span> */}
@@ -322,7 +320,7 @@ export default function Home() {
                     <>
                         <button
                             onClick={() => setScreen("menu")}
-                            className="self-start flex items-center gap-2 text-[#8E8980] hover:text-[#143A6C] transition-all mb-6 text-[1.2rem] cursor-pointer group"
+                            className="self-start flex items-center gap-2 text-[#8E8980] hover:text-[#CE670E] transition-all mb-6 text-[1.2rem] cursor-pointer group"
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5 group-hover:-translate-x-1 transition-transform">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
@@ -339,7 +337,7 @@ export default function Home() {
                                 Room Code
                             </label>
                             <input
-                                className="w-full bg-[#FAF7F2] border border-[#D8D3C5] rounded-[12px] px-5 py-3.5 text-center text-[1.7rem] tracking-[0.2em] text-[#2D2A26] outline-none focus:border-[#143A6C] focus:ring-1 focus:ring-[#143A6C] transition-all placeholder:text-[#8E8980]/30 font-bold uppercase"
+                                className="w-full bg-[#F3EFE6] border border-[#D8D3C5] rounded-[12px] px-5 py-3.5 text-center text-[1.7rem] tracking-[0.2em] text-[#2D2A26] outline-none focus:border-[#CE670E] focus:ring-1 focus:ring-[#CE670E] transition-all placeholder:text-[#8E8980]/30 font-bold uppercase"
                                 placeholder="LOBBY"
                                 value={roomId}
                                 onChange={(e) => setRoomId(e.target.value.toUpperCase().slice(0, 6))}
@@ -350,7 +348,7 @@ export default function Home() {
                         <button
                             onClick={joinRoom}
                             disabled={!roomId.trim() || !name.trim()}
-                            className="w-full max-w-[340px] border border-[#143A6C] text-white bg-[#143A6C] rounded-[12px] py-4 text-[1.4rem] font-bold hover:bg-[#0f2e57] active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+                            className="w-full max-w-[340px] border border-[#CE670E] text-white bg-[#CE670E] rounded-[12px] py-4 text-[1.4rem] font-bold hover:bg-[#0f2e57] active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer shadow-md hover:shadow-lg flex items-center justify-center gap-2"
                         >
                             <span>Join Game</span>
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5">
@@ -365,7 +363,7 @@ export default function Home() {
                     <>
                         <button
                             onClick={() => setScreen("menu")}
-                            className="self-start flex items-center gap-2 text-[#8E8980] hover:text-[#143A6C] transition-all mb-6 text-[1.2rem] cursor-pointer group"
+                            className="self-start flex items-center gap-2 text-[#8E8980] hover:text-[#CE670E] transition-all mb-6 text-[1.2rem] cursor-pointer group"
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5 group-hover:-translate-x-1 transition-transform">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
@@ -390,7 +388,7 @@ export default function Home() {
                             <button
                                 onClick={() => setGameMode("custom")}
                                 className={`flex-1 py-2.5 text-[1.15rem] font-semibold rounded-r-[12px] border border-l-0 transition-all duration-200 cursor-pointer ${gameMode === "custom"
-                                    ? "bg-[#143A6C]/8 border-[#143A6C]/40 text-[#143A6C]"
+                                    ? "bg-[#CE670E]/8 border-[#CE670E]/40 text-[#CE670E]"
                                     : "bg-transparent border-[#E5E0D5] text-[#8E8980] hover:text-[#5C5751]"
                                     }`}
                             >
@@ -463,9 +461,9 @@ export default function Home() {
                                     </div>
                                 </div>
 
-                                <div className="flex items-center justify-between py-2.5 px-4 rounded-[12px] border border-[#E5E0D5] bg-[#FAF7F2]">
+                                <div className="flex items-center justify-between py-2.5 px-4 rounded-[12px] border border-[#E5E0D5] bg-[#F3EFE6]">
                                     <span className="text-[1.05rem] text-[#8E8980] uppercase tracking-wider font-bold">max points limit</span>
-                                    <span className="text-[1.3rem] font-bold text-[#143A6C]">{maxPoints} points</span>
+                                    <span className="text-[1.3rem] font-bold text-[#CE670E]">{maxPoints} points</span>
                                 </div>
 
                                 <div className="flex flex-col gap-2">
@@ -492,7 +490,7 @@ export default function Home() {
                                         <div
                                             key={t.partners}
                                             className={`flex flex-col gap-2.5 p-4 rounded-[16px] border transition-all duration-200 ${t.disabled
-                                                ? "border-black/5 bg-[#FAF7F2] opacity-45"
+                                                ? "border-black/5 bg-[#F3EFE6] opacity-45"
                                                 : "border-[#E5E0D5] bg-[#FDFCFB]"
                                                 }`}
                                         >
@@ -523,7 +521,7 @@ export default function Home() {
                                                     disabled={t.disabled}
                                                     className="flex-1"
                                                 />
-                                                <span className={`text-[1.2rem] font-bold min-w-[75px] text-right ${t.disabled ? "text-[#8E8980]" : "text-[#143A6C]"}`}>
+                                                <span className={`text-[1.2rem] font-bold min-w-[75px] text-right ${t.disabled ? "text-[#8E8980]" : "text-[#CE670E]"}`}>
                                                     {t.threshold} pts
                                                 </span>
                                             </div>
@@ -542,7 +540,7 @@ export default function Home() {
                         <button
                             onClick={createRoom}
                             disabled={!name.trim()}
-                            className="w-full max-w-[340px] border border-[#143A6C] text-white bg-[#143A6C] rounded-[12px] py-4 text-[1.4rem] font-bold hover:bg-[#0f2e57] active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer shadow-md hover:shadow-lg flex items-center justify-center gap-2 mt-2"
+                            className="w-full max-w-[340px] border border-[#CE670E] text-white bg-[#CE670E] rounded-[12px] py-4 text-[1.4rem] font-bold hover:bg-[#0f2e57] active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer shadow-md hover:shadow-lg flex items-center justify-center gap-2 mt-2"
                         >
                             <span>Host Game</span>
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5">

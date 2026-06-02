@@ -47,6 +47,7 @@ interface RoomState {
     playerColors: Record<string, string>
     playerTeams: Record<string, string>
     playerDresses: Record<string, string>
+    totalHand: number
 }
 
 type SortMode = "suit" | "rank"
@@ -87,9 +88,9 @@ const RANK_OPTIONS = [
 ]
 
 const AVATAR_COLORS = [
-    "#FF4242", "#FFCA3A", "#8AC926", "#6EDDFF",
-    "#FF5BD3", "#434DFF", "#FF8019", "#71FCD0",
-    "#AE4AFF", "#F31F6A", "#e7ff32", "#ebebeb"
+    "#F14E4E", "#F2B616", "#7ABF0C", "#37C3EE",
+    "#F95DCF", "#3C45DD", "#FA7E1A", "#2BD49F",
+    "#901BEF", "#BF0043", "#537818", "#545454"
 ]
 
 const AVATAR_DRESSES = [
@@ -110,7 +111,6 @@ const CARD_H = 101
 // Max 6 turning cards possible, pre-allocate slots
 const MAX_TURNING_CARDS = 6
 const MAX_HAND_DISPLAY_WIDTH = 640
-const TOTAL_HANDS = 16
 
 const DEFAULT_ROOM: RoomState = {
     players: [],
@@ -148,6 +148,7 @@ const DEFAULT_ROOM: RoomState = {
     playerColors: {},
     playerTeams: {},
     playerDresses: {},
+    totalHand: 0,
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -170,6 +171,7 @@ function safeRoom(r: Partial<RoomState>): RoomState {
         playerColors: r.playerColors ?? {},
         playerTeams: r.playerTeams ?? {},
         playerDresses: r.playerDresses ?? {},
+        totalHand: r.totalHand ?? 0,
     }
 }
 
@@ -213,22 +215,22 @@ function getOvalPositions(n: number) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function CardHand({ cards, selectedCard, onSelectCard, opacity = 1 }: { cards: string[]; selectedCard?: string | null; onSelectCard?: (card: string) => void; opacity?: number }) {
+function CardHand({ cards, selectedCard, onSelectCard, opacity = 1, cardW = CARD_W, cardH = CARD_H, maxWidth = MAX_HAND_DISPLAY_WIDTH }: { cards: string[]; selectedCard?: string | null; onSelectCard?: (card: string) => void; opacity?: number; cardW?: number; cardH?: number; maxWidth?: number }) {
     const n = cards.length
     if (n === 0) return null
-    const naturalWidth = n * CARD_W + (n - 1) * 4
-    const containerWidth = Math.min(naturalWidth, MAX_HAND_DISPLAY_WIDTH)
-    const step = n > 1 ? Math.min(CARD_W + 4, (containerWidth - CARD_W) / (n - 1)) : CARD_W
+    const naturalWidth = n * cardW + (n - 1) * 4
+    const containerWidth = Math.min(naturalWidth, maxWidth)
+    const step = n > 1 ? Math.min(cardW + 4, (containerWidth - cardW) / (n - 1)) : cardW
 
     return (
-        <div className="relative mx-auto" style={{ width: `${containerWidth}px`, height: `${CARD_H}px`, opacity }}>
+        <div className="relative mx-auto" style={{ width: `${containerWidth}px`, height: `${cardH}px`, opacity }}>
             {cards.map((card, i) => {
                 const isSelected = selectedCard === card
                 return (
                     <div
                         key={`${card}-${i}`}
                         className={`absolute top-0 transition-transform duration-150 cursor-pointer ${isSelected ? "-translate-y-4" : "hover:-translate-y-3"}`}
-                        style={{ left: `${i * step}px`, zIndex: isSelected ? 999 : i, width: `${CARD_W}px`, height: `${CARD_H}px` }}
+                        style={{ left: `${i * step}px`, zIndex: isSelected ? 999 : i, width: `${cardW}px`, height: `${cardH}px` }}
                         onClick={() => onSelectCard?.(card)}
                     >
                         <img
@@ -237,7 +239,7 @@ function CardHand({ cards, selectedCard, onSelectCard, opacity = 1 }: { cards: s
                             draggable={false}
                             className="block select-none rounded-md"
                             style={{
-                                width: `${CARD_W}px`, height: `${CARD_H}px`,
+                                width: `${cardW}px`, height: `${cardH}px`,
                                 boxShadow: isSelected ? "0 0 20px rgba(20,58,108,0.3), 0 4px 16px rgba(0,0,0,0.15)" : "0 4px 16px rgba(0,0,0,0.15)",
                                 outline: isSelected ? "2px solid rgba(20,58,108,0.8)" : "none",
                                 borderRadius: "6px",
@@ -268,7 +270,7 @@ function TurningCardBadge({ card }: { card: string }) {
     return (
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/15 bg-white/5" style={{ minWidth: "56px" }}>
             <span style={{ color: p.color, fontSize: "15px", lineHeight: 1 }}>{p.symbol}</span>
-            <span className="text-[15px] font-bold text-[#e8e3d8]">{p.value}</span>
+            <span className="text-[15px] font-bold" style={{ color: p.color }}>{p.value}</span>
         </div>
     )
 }
@@ -321,6 +323,7 @@ export default function Room() {
     const myName = (search.get("name") ?? "").trim()
 
     const [room, setRoom] = useState<RoomState>(DEFAULT_ROOM)
+    const totalHandCount = room.totalHand || Math.floor((52 * (room.numDecks || 1)) / (room.targetPlayers || 4))
     const [myId, setMyId] = useState("")
     const myIdRef = useRef("")
     const [selectedSuit, setSelectedSuit] = useState<string | null>(null)
@@ -329,6 +332,26 @@ export default function Room() {
     const [showTrickPopup, setShowTrickPopup] = useState(false)
     const [isCustomizing, setIsCustomizing] = useState(false)
     const [cardOpacity, setCardOpacity] = useState(1.0)
+    const [sidebarOpen, setSidebarOpen] = useState(false)
+    const [isMobile, setIsMobile] = useState(false)
+
+    // Mobile detection
+    useEffect(() => {
+        const mq = window.matchMedia("(max-width: 768px)")
+        setIsMobile(mq.matches)
+        const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
+        mq.addEventListener("change", handler)
+        return () => mq.removeEventListener("change", handler)
+    }, [])
+
+    // Mobile-responsive card sizes
+    const mCardW = isMobile ? 52 : CARD_W
+    const mCardH = isMobile ? 73 : CARD_H
+    const mMaxHandWidth = isMobile ? (typeof window !== "undefined" ? Math.max(window.innerWidth - 24, 480) : 480) : MAX_HAND_DISPLAY_WIDTH
+    const mTrickCardW = isMobile ? 40 : 52
+    const mTrickCardH = isMobile ? 56 : 73
+    const mAvatarSize = isMobile ? 38 : 54
+    const mControlW = isMobile ? 140 : 210
 
     // Turning card selections: array of { suit, rank, priority } — pre-allocated to MAX_TURNING_CARDS
     const [turningSelections, setTurningSelections] = useState<{ suit: string; rank: string; priority: string }[]>(
@@ -399,8 +422,8 @@ export default function Room() {
     const allTCDone = tcSlots.every(s => s.suit !== "" && s.rank !== "" && (!needsPriority || s.priority !== ""))
     const canConfirm = !!selectedSuit && allTCDone
 
-    const HAND_H = CARD_H + 40     // card height + label + padding
-    const CONTROL_W = 210             // right control panel width
+    const HAND_H = mCardH + 40     // card height + label + padding
+    const CONTROL_W = mControlW      // right control panel width
 
     const redMembers = room.players.filter(p => room.playerTeams?.[p.id] === "red")
     const blueMembers = room.players.filter(p => room.playerTeams?.[p.id] === "blue")
@@ -467,7 +490,7 @@ export default function Room() {
                     padding:6px 8px;color:#2D2A26;font-family:inherit;
                     font-size:14px;width:100%;cursor:pointer;outline:none;
                 }
-                .card-select:focus{border-color:#143A6C;}
+                .card-select:focus{border-color:#CE670E;}
                 .card-select option{background:#FAF7F2;color:#2D2A26;}
                 .vertical-slider {
                     -webkit-appearance: none;
@@ -486,7 +509,7 @@ export default function Room() {
                     width: 14px;
                     height: 14px;
                     border-radius: 50%;
-                    background: #143A6C;
+                    background: #CE670E;
                     cursor: pointer;
                     box-shadow: 0 0 10px rgba(20,58,108,0.3);
                     transition: transform 0.1s, background-color 0.1s;
@@ -500,7 +523,7 @@ export default function Room() {
                     height: 14px;
                     border: none;
                     border-radius: 50%;
-                    background: #143A6C;
+                    background: #CE670E;
                     cursor: pointer;
                     box-shadow: 0 0 10px rgba(20,58,108,0.3);
                     transition: transform 0.1s, background-color 0.1s;
@@ -509,10 +532,61 @@ export default function Room() {
                     background: #1E4E8A;
                     transform: scale(1.15);
                 }
+                .cards-scrollbar::-webkit-scrollbar {
+                    height: 5px;
+                }
+                .cards-scrollbar::-webkit-scrollbar-track {
+                    background: rgba(0, 0, 0, 0.03);
+                    border-radius: 10px;
+                }
+                .cards-scrollbar::-webkit-scrollbar-thumb {
+                    background: rgba(20, 58, 108, 0.15);
+                    border-radius: 10px;
+                }
+                .cards-scrollbar::-webkit-scrollbar-thumb:hover {
+                    background: rgba(20, 58, 108, 0.3);
+                }
             `}</style>
 
+            {/* ── MOBILE HAMBURGER BUTTON ────────────────────────────────── */}
+            {isMobile && (
+                <button
+                    onClick={() => setSidebarOpen(true)}
+                    className="fixed top-3 left-3 z-30 w-10 h-10 flex items-center justify-center rounded-xl border border-[#D8D3C5] bg-[#F3EFE6]/90 backdrop-blur-sm shadow-md hover:bg-[#EBE7DC] transition-all cursor-pointer"
+                    aria-label="Open menu"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="#2D2A26" className="w-5 h-5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+                    </svg>
+                </button>
+            )}
+
+            {/* ── MOBILE BACKDROP ─────────────────────────────────────────── */}
+            {isMobile && sidebarOpen && (
+                <div
+                    className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] transition-opacity duration-300"
+                    onClick={() => setSidebarOpen(false)}
+                />
+            )}
+
             {/* ── LEFT PANEL ────────────────────────────────────────────── */}
-            <aside className="w-[252px] min-w-[252px] h-full flex flex-col p-5 border-r border-[#E5E0D5] bg-[#F3EFE6] z-10 overflow-y-auto">
+            <aside
+                className={`${isMobile
+                    ? `fixed inset-y-0 left-0 z-50 w-[280px] transition-transform duration-300 ease-in-out ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} shadow-2xl`
+                    : "w-[252px] min-w-[252px]"
+                    } h-full flex flex-col p-5 border-r border-[#E5E0D5] bg-[#F3EFE6] overflow-y-auto`}
+            >
+
+                {/* Mobile close button at top of sidebar */}
+                {isMobile && (
+                    <button
+                        onClick={() => setSidebarOpen(false)}
+                        className="self-end mb-1 w-8 h-8 flex items-center justify-center rounded-lg border border-[#D8D3C5] text-[#8E8980] hover:text-[#2D2A26] hover:bg-[#FAF7F2] transition-all cursor-pointer shrink-0"
+                        aria-label="Close menu"
+                    >
+                        ✕
+                    </button>
+                )}
 
                 <div className="mb-[18px]">
                     <div className="text-[13px] text-[#8E8980] tracking-wider mb-0.5">room</div>
@@ -538,7 +612,7 @@ export default function Room() {
                                         onClick={() => !isTaken && socket.emit("update-color", { roomId, color })}
                                         disabled={isTaken}
                                         className={`relative w-full flex items-center justify-center aspect-square rounded-[14px] border-2 transition-all duration-200 ${room.playerColors?.[effectiveMyId] === color
-                                            ? "border-[#143A6C] scale-105 shadow-[0_0_14px_rgba(20,58,108,0.25)] z-10"
+                                            ? "border-[#CE670E] scale-105 shadow-[0_0_14px_rgba(20,58,108,0.25)] z-10"
                                             : isTaken
                                                 ? "border-transparent opacity-30 grayscale-[0.6] cursor-not-allowed"
                                                 : "border-transparent opacity-60 hover:opacity-100 hover:scale-105 hover:border-black/30 cursor-pointer"
@@ -562,7 +636,7 @@ export default function Room() {
                                         key={dress.id}
                                         onClick={() => socket.emit("update-dress", { roomId, dress: dress.id })}
                                         className={`relative w-full flex items-center justify-center aspect-square rounded-[14px] border-2 transition-all duration-200 bg-[#FAF7F2] ${isSelected
-                                            ? "border-[#143A6C] scale-105 shadow-[0_0_14px_rgba(20,58,108,0.25)] z-10"
+                                            ? "border-[#CE670E] scale-105 shadow-[0_0_14px_rgba(20,58,108,0.25)] z-10"
                                             : "border-transparent opacity-60 hover:opacity-100 hover:scale-105 hover:border-black/20 cursor-pointer"
                                             }`}
                                     >
@@ -585,8 +659,8 @@ export default function Room() {
                     <>
                         {/* ══ WAITING ═══════════════════════════════════════════════ */}
                         {room.phase === "waiting" && room.isCustomRule && (
-                            <div className="mb-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[#143A6C]/30 bg-[#143A6C]/8">
-                                <span className="text-[12px] font-bold text-[#143A6C]/80 tracking-wider uppercase">custom rules</span>
+                            <div className="mb-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[#CE670E]/30 bg-[#CE670E]/8">
+                                <span className="text-[12px] font-bold text-[#CE670E]/80 tracking-wider uppercase">custom rules</span>
                             </div>
                         )}
                         {room.phase === "waiting" && (
@@ -634,7 +708,7 @@ export default function Room() {
                                         <button
                                             onClick={startBidding}
                                             disabled={needsMore !== 0 || !room.cardsDealt}
-                                            className="w-full py-3 border border-[#143A6C]/50 rounded-lg text-[#143A6C] font-bold text-xl hover:bg-[#143A6C]/5 disabled:opacity-20 transition-all cursor-pointer"
+                                            className="w-full py-3 border border-[#CE670E]/50 rounded-lg text-[#CE670E] font-bold text-xl hover:bg-[#CE670E]/5 disabled:opacity-20 transition-all cursor-pointer"
                                         >
                                             {needsMore > 0 ? `need ${needsMore} more` : !room.cardsDealt ? "deal cards first" : "start bidding"}
                                         </button>
@@ -651,7 +725,7 @@ export default function Room() {
                         {room.phase === "bidding" && (
                             <div className="flex flex-col gap-3">
                                 <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                                    {([["max pts", String(room.maxPoints || 250)], ["hands", String(TOTAL_HANDS)]] as [string, string][]).map(([l, v]) => (
+                                    {([["max pts", String(room.maxPoints || 250)], ["hands", String(totalHandCount)]] as [string, string][]).map(([l, v]) => (
                                         <div key={l} className="flex flex-col">
                                             <span className="text-[12px] text-[#8E8980]">{l}</span>
                                             <span className="text-[22px] font-bold leading-tight">{v}</span>
@@ -659,12 +733,12 @@ export default function Room() {
                                     ))}
                                 </div>
 
-                                <div className="w-full h-px bg-[#E5E0D5]" />
+                                {/* <div className="w-full h-px bg-[#E5E0D5]" /> */}
 
                                 <div>
                                     <div className="text-[13px] text-[#8E8980]">highest bid</div>
                                     <div className="flex items-baseline gap-2 mt-0.5">
-                                        <span className={`font-bold leading-none ${room.highestBidderId ? "text-4xl text-[#143A6C]" : "text-2xl text-[#8E8980]/50"}`}>
+                                        <span className={`font-bold leading-none ${room.highestBidderId ? "text-4xl text-[#CE670E]" : "text-2xl text-[#8E8980]/50"}`}>
                                             {room.highestBidderId ? room.highestBid : `Start: ${room.minBid}`}
                                         </span>
                                         {room.highestBidderName && (
@@ -718,7 +792,7 @@ export default function Room() {
                             <div className="flex flex-col gap-3">
                                 <div>
                                     <div className="text-[13px] text-[#8E8980]">bid won</div>
-                                    <div className="text-3xl font-bold text-[#143A6C] leading-none">{room.highestBid}</div>
+                                    <div className="text-3xl font-bold text-[#CE670E] leading-none">{room.highestBid}</div>
                                     <div className="text-sm text-[#8E8980] mt-0.5">
                                         by {selectorPlayer?.name || "…"} · {room.numPartners} partner{room.numPartners !== 1 ? "s" : ""}
                                     </div>
@@ -752,7 +826,7 @@ export default function Room() {
                                         <div>
                                             <div className="text-[13px] text-[#8E8980] mb-2">
                                                 turning cards
-                                                <span className="ml-1.5 text-[#143A6C]/70 font-semibold">×{numTC}</span>
+                                                <span className="ml-1.5 text-[#CE670E]/70 font-semibold">×{numTC}</span>
                                             </div>
                                             <div className="flex flex-col gap-2.5">
                                                 {Array.from({ length: numTC }, (_, idx) => (
@@ -799,7 +873,7 @@ export default function Room() {
                                         <button
                                             onClick={confirmTrump}
                                             disabled={!canConfirm}
-                                            className="w-full py-2.5 border border-[#143A6C]/40 rounded-lg text-[#143A6C] bg-[#143A6C]/5 text-xl font-bold hover:bg-[#143A6C]/10 disabled:opacity-20 transition-colors cursor-pointer"
+                                            className="w-full py-2.5 border border-[#CE670E]/40 rounded-lg text-[#CE670E] bg-[#CE670E]/5 text-xl font-bold hover:bg-[#CE670E]/10 disabled:opacity-20 transition-colors cursor-pointer"
                                         >
                                             Set Cards
                                         </button>
@@ -834,11 +908,11 @@ export default function Room() {
                                 <div className="flex justify-between items-center text-[#2D2A26]">
                                     <div>
                                         <div className="text-[13px] text-[#8E8980]">hand</div>
-                                        <div className="text-2xl font-bold">{room.handNumber}</div>
+                                        <div className="text-2xl font-bold">{room.handNumber}/{totalHandCount}</div>
                                     </div>
                                     <div>
                                         <div className="text-[13px] text-[#8E8980]">bid</div>
-                                        <div className="text-2xl font-bold text-[#143A6C]">{room.highestBid}</div>
+                                        <div className="text-2xl font-bold">{room.highestBid}</div>
                                     </div>
                                     <div className="text-right">
                                         <div className="text-[13px] text-[#8E8980]">partners</div>
@@ -865,35 +939,13 @@ export default function Room() {
                                 {/* Scoreboard */}
                                 <div>
                                     <div className="flex flex-col gap-4">
-                                        {/* Red Team */}
-                                        <div>
-                                            <div className="flex justify-between items-end mb-1.5">
-                                                <div>
-                                                    <div className="text-[11px] text-red-600 opacity-90 font-bold tracking-wider uppercase">red team</div>
-                                                    <div className="text-[20px] font-bold text-red-600 mt-0.5">{getTeamPts("red")} <span className="text-[13px] font-normal text-[#8E8980]">/ {room.maxPoints || 250}</span></div>
-                                                </div>
-                                                <div className="text-right">
-                                                    <div className="text-[11px] text-red-600 opacity-90 font-bold tracking-wider uppercase">hands</div>
-                                                    <div className="text-lg font-bold">{getTeamTrks("red")}</div>
-                                                </div>
-                                            </div>
-                                            <div className="flex flex-wrap gap-2 mt-2">
-                                                {redMembers.map(p => (
-                                                    <div key={p.id} className={`flex items-center justify-center w-[30px] h-[30px] rounded ${room.players[room.currentPlayerIndex]?.id === p.id ? "ring-1 ring-[#143A6C]" : ""}`} title={p.name}>
-                                                        <AvatarIcon dress={room.playerDresses?.[p.id]} color={room.playerColors?.[p.id] || "#2D2A26"} size={28} />
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        <div className="w-full h-px bg-[#E5E0D5]" />
 
                                         {/* Blue Team */}
                                         <div>
                                             <div className="flex justify-between items-end mb-1.5">
                                                 <div>
-                                                    <div className="text-[11px] text-blue-600 opacity-90 font-bold tracking-wider uppercase">blue team</div>
-                                                    <div className="text-[20px] font-bold text-blue-600 mt-0.5">{getTeamPts("blue")} <span className="text-[13px] font-normal text-[#8E8980]">/ {room.maxPoints || 250}</span></div>
+                                                    <div className="text-[11px] text-blue-600 opacity-90 font-bold tracking-wider uppercase">Kings</div>
+                                                    <div className="text-[20px] font-bold text-blue-600 mt-0.5">{getTeamPts("blue")} <span className="text-[13px] font-normal text-[#8E8980]">/ {room.maxPoints - room.highestBid + 5 || 250}</span></div>
                                                 </div>
                                                 <div className="text-right">
                                                     <div className="text-[11px] text-blue-600 opacity-90 font-bold tracking-wider uppercase">hands</div>
@@ -902,12 +954,36 @@ export default function Room() {
                                             </div>
                                             <div className="flex flex-wrap gap-2 mt-2">
                                                 {blueMembers.map(p => (
-                                                    <div key={p.id} className={`flex items-center justify-center w-[30px] h-[30px] rounded ${room.players[room.currentPlayerIndex]?.id === p.id ? "ring-1 ring-[#143A6C]" : ""}`} title={p.name}>
+                                                    <div key={p.id} className={`flex items-center justify-center w-[30px] h-[30px] rounded ${room.players[room.currentPlayerIndex]?.id === p.id ? "ring-1 ring-[#CE670E]" : ""}`} title={p.name}>
                                                         <AvatarIcon dress={room.playerDresses?.[p.id]} color={room.playerColors?.[p.id] || "#2D2A26"} size={28} />
                                                     </div>
                                                 ))}
                                             </div>
                                         </div>
+
+                                        <div className="w-full h-px bg-[#E5E0D5]" />
+
+                                        {/* Red Team */}
+                                        <div>
+                                            <div className="flex justify-between items-end mb-1.5">
+                                                <div>
+                                                    <div className="text-[11px] text-red-600 opacity-90 font-bold tracking-wider uppercase">Rebels</div>
+                                                    <div className="text-[20px] font-bold text-red-600 mt-0.5">{getTeamPts("red")} <span className="text-[13px] font-normal text-[#8E8980]">/ {room.highestBid || 250}</span></div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <div className="text-[11px] text-red-600 opacity-90 font-bold tracking-wider uppercase">hands</div>
+                                                    <div className="text-lg font-bold">{getTeamTrks("red")}</div>
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2 mt-2">
+                                                {redMembers.map(p => (
+                                                    <div key={p.id} className={`flex items-center justify-center w-[30px] h-[30px] rounded ${room.players[room.currentPlayerIndex]?.id === p.id ? "ring-1 ring-[#CE670E]" : ""}`} title={p.name}>
+                                                        <AvatarIcon dress={room.playerDresses?.[p.id]} color={room.playerColors?.[p.id] || "#2D2A26"} size={28} />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
                                     </div>
                                 </div>
 
@@ -929,7 +1005,7 @@ export default function Room() {
                         <div className="flex items-center justify-between bg-[#FAF7F2] border border-[#E5E0D5] rounded-xl p-3">
                             <div className="flex items-center gap-3">
                                 <AvatarIcon dress={room.playerDresses?.[effectiveMyId]} color={room.playerColors?.[effectiveMyId] || "#2D2A26"} size={40} />
-                                <span className="font-semibold text-[15px] truncate max-w-[80px] text-[#143A6C]">
+                                <span className="font-semibold text-[15px] truncate max-w-[80px]">
                                     {myName || "You"}
                                 </span>
                             </div>
@@ -977,7 +1053,7 @@ export default function Room() {
                                     alt={entry.card}
                                     draggable={false}
                                     className="block select-none rounded"
-                                    style={{ width: "52px", height: "73px", boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}
+                                    style={{ width: `${mTrickCardW}px`, height: `${mTrickCardH}px`, boxShadow: "0 2px 12px rgba(0,0,0,0.15)" }}
                                     onError={(e) => {
                                         const t = e.currentTarget as HTMLImageElement
                                         t.style.display = "none"
@@ -985,7 +1061,7 @@ export default function Room() {
                                         if (par && !par.querySelector(".card-fallback")) {
                                             const fb = document.createElement("div")
                                             fb.className = "card-fallback rounded flex flex-col items-center justify-center gap-0.5"
-                                            fb.style.cssText = `width:52px;height:73px;background:#FDFCFB;border:1.5px solid #D8D3C5;box-shadow:0 2px 8px rgba(0,0,0,0.1);`
+                                            fb.style.cssText = `width:${mTrickCardW}px;height:${mTrickCardH}px;background:#FDFCFB;border:1.5px solid #D8D3C5;box-shadow:0 2px 8px rgba(0,0,0,0.1);`
                                             fb.innerHTML = `<span style="color:${pc.color};font-size:16px;line-height:1">${pc.symbol}</span><span style="color:rgba(0,0,0,0.6);font-size:11px;font-weight:600">${pc.value}</span>`
                                             par.appendChild(fb)
                                         }
@@ -1012,17 +1088,17 @@ export default function Room() {
                         return (
                             <div
                                 key={player.id}
-                                className={`absolute flex flex-col items-center gap-0.5 min-w-[88px] transition-opacity duration-300 ${hasForfeited ? "opacity-40" : "opacity-100"}`}
+                                className={`absolute flex flex-col items-center gap-0.5 ${isMobile ? "min-w-[60px]" : "min-w-[88px]"} transition-opacity duration-300`}
                                 style={{ left: `${pos.x}%`, top: `${pos.y}%`, transform: "translate(-50%, -50%)" }}
                             >
                                 <div
                                     className={`shrink-0 transition-all ${(isCurrentBidder || isCurrentPlayTurn) ? "drop-shadow-[0_0_12px_rgba(20,58,108,0.4)] animate-pulse-glow" : "drop-shadow-[0_2px_6px_rgba(0,0,0,0.15)]"}`}
                                 >
-                                    <AvatarIcon dress={room.playerDresses?.[player.id]} color={room.playerColors?.[player.id] || "#2D2A26"} size={54} />
+                                    <AvatarIcon dress={room.playerDresses?.[player.id]} color={room.playerColors?.[player.id] || "#2D2A26"} size={mAvatarSize} />
                                 </div>
 
                                 <div
-                                    className={`text-[16px] text-center whitespace-nowrap tracking-wide drop-shadow-sm transition-all ${isMe ? "scale-105" : ""}`}
+                                    className={`${isMobile ? "text-[12px]" : "text-[16px]"} text-center whitespace-nowrap tracking-wide drop-shadow-sm transition-all ${isMe ? "scale-105" : ""}`}
                                     style={{ color: room.playerColors?.[player.id] || "#2D2A26" }}
                                 >
                                     {displayName}
@@ -1030,7 +1106,7 @@ export default function Room() {
                                 </div>
 
                                 {room.phase === "playing" ? (
-                                    <div className="text-[14px] text-[#8E8980] font-semibold tracking-wide mt-0.5">
+                                    <div className={`${isMobile ? "text-[11px]" : "text-[14px]"} text-[#8E8980] font-semibold tracking-wide mt-0.5`}>
                                         ({playerPts}/{playerTricks})
                                     </div>
                                 ) : (
@@ -1041,11 +1117,11 @@ export default function Room() {
 
                                         <div className="min-h-[24px] flex items-center justify-center">
                                             {isCurrentBidder && !hasForfeited ? (
-                                                <span className="text-[13px] text-blue-700 border border-blue-400/40 bg-blue-50 rounded px-2 py-px font-semibold animate-pulse">bidding...</span>
+                                                <span className={`${isMobile ? "text-[11px]" : "text-[13px]"} text-blue-700 border border-blue-400/40 bg-blue-50 rounded px-2 py-px font-semibold animate-pulse`}>bidding...</span>
                                             ) : hasForfeited ? (
-                                                <span className="text-[13px] text-[#8E8980] border border-[#D8D3C5] bg-[#FAF7F2] rounded px-2 py-px">forfeit</span>
+                                                <span className={`${isMobile ? "text-[11px]" : "text-[13px]"} text-[#8E8980] border border-[#D8D3C5] bg-[#FAF7F2] rounded px-2 py-px`}>forfeit</span>
                                             ) : isHighestBidder && room.phase !== "waiting" ? (
-                                                <span className="text-[13px] text-green-700 border border-green-500/40 bg-green-50 rounded px-2 py-px font-bold">{room.highestBid}</span>
+                                                <span className={`${isMobile ? "text-[11px]" : "text-[13px]"} text-green-700 border border-green-500/40 bg-green-50 rounded px-2 py-px font-bold`}>{room.highestBid}</span>
                                             ) : null}
                                         </div>
                                     </>
@@ -1064,7 +1140,7 @@ export default function Room() {
                     {room.phase === "playing" && room.trickPending && showTrickPopup && (
                         <div className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none">
                             <div
-                                className="pointer-events-auto flex flex-col items-center gap-4 px-10 py-7 rounded-2xl border border-[#D8D3C5] relative"
+                                className={`pointer-events-auto flex flex-col items-center gap-3 ${isMobile ? "gap-2 px-6 py-5" : "gap-4 px-10 py-7"} rounded-2xl border border-[#D8D3C5] relative`}
                                 style={{
                                     background: "rgba(253,252,251,0.85)",
                                     backdropFilter: "blur(18px)",
@@ -1081,7 +1157,7 @@ export default function Room() {
                                 </button>
                                 <div className="text-[13px] tracking-[0.2em] uppercase text-[#8E8980]">hand won</div>
                                 <div
-                                    className="text-3xl drop-shadow-[0_0_18px_rgba(0,0,0,0.05)] text-center text-[#2D2A26]"
+                                    className={`${isMobile ? "text-xl" : "text-3xl"} drop-shadow-[0_0_18px_rgba(0,0,0,0.05)] text-center text-[#2D2A26]`}
                                 >
                                     <span className="font-bold" style={{ color: room.playerColors?.[room.lastTrickWinner || ""] || "#2D2A26" }}>{trickWinnerName}</span> won the hand
                                 </div>
@@ -1107,83 +1183,108 @@ export default function Room() {
                         style={{ flexShrink: 0 }}
                     >
                         {/* ── Hand area ── */}
-                        <div className="flex-1 flex flex-col items-center justify-centre pb-4 pt-2 bg-[#F3EFE6] overflow-hidden">
-                            <div className="text-[11px] text-[#8E8980] tracking-[0.2em] uppercase mb-2">
+                        <div className="flex-1 flex flex-col justify-center bg-[#F3EFE6] overflow-hidden">
+                            {/* <div className={`${isMobile ? "text-[10px]" : "text-[11px]"} text-[#8E8980] tracking-[0.2em] uppercase mb-1 text-center shrink-0`}>
                                 your hand · {myCards.length} cards
+                            </div> */}
+                            <div className="w-full overflow-x-auto overflow-y-visible text-center pt-5 pb-2 cards-scrollbar">
+                                <div className="inline-block text-left px-6 relative">
+                                    <CardHand cards={myCards} selectedCard={selectedCard} onSelectCard={(c) => setSelectedCard(prev => prev === c ? null : c)} opacity={cardOpacity} cardW={mCardW} cardH={mCardH} maxWidth={mMaxHandWidth} />
+                                </div>
                             </div>
-                            <CardHand cards={myCards} selectedCard={selectedCard} onSelectCard={(c) => setSelectedCard(prev => prev === c ? null : c)} opacity={cardOpacity} />
                         </div>
 
                         {/* ── Right control panel ── */}
                         <div
-                            className="flex flex-row gap-3 border-l border-[#E5E0D5] bg-[#EBE7DC] px-3 py-3 shrink-0"
+                            className={`flex flex-row ${isMobile ? "gap-1.5 px-2 py-2" : "gap-3 px-3 py-3"} border-l border-[#E5E0D5] bg-[#EBE7DC] shrink-0`}
                             style={{ width: `${CONTROL_W}px` }}
                         >
-                            {/* Left Column: Vertical opacity slider */}
-                            <div className="flex flex-col items-center justify-between w-8 select-none py-1 border-r border-[#D8D3C5] pr-2.5">
-                                {/* Eye Symbol */}
-                                <div className="text-[#8E8980] hover:text-[#143A6C] transition-colors cursor-pointer" title="Card Opacity">
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                                    </svg>
+                            {/* Vertical opacity slider — hidden on mobile */}
+                            {!isMobile && (
+                                <div className="flex flex-col items-center justify-between w-8 select-none py-1 border-r border-[#D8D3C5] pr-2.5">
+                                    <div className="text-[#8E8980] hover:text-[#CE670E] transition-colors cursor-pointer" title="Card Opacity">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                                        </svg>
+                                    </div>
+                                    <div className="h-[90px] w-6 flex items-center justify-center relative my-2">
+                                        <input
+                                            type="range"
+                                            min="0.05"
+                                            max="1"
+                                            step="0.05"
+                                            value={cardOpacity}
+                                            onChange={(e) => setCardOpacity(parseFloat(e.target.value))}
+                                            className="absolute w-[90px] cursor-pointer vertical-slider"
+                                            style={{
+                                                transform: "rotate(-90deg)",
+                                                height: "6px",
+                                                margin: 0,
+                                            }}
+                                        />
+                                    </div>
+                                    <span className="text-[10px] text-[#8E8980] font-mono tabular-nums leading-none">
+                                        {Math.round(cardOpacity * 100)}%
+                                    </span>
                                 </div>
+                            )}
 
-                                {/* Slider Wrapper */}
-                                <div className="h-[90px] w-6 flex items-center justify-center relative my-2">
-                                    <input
-                                        type="range"
-                                        min="0.05"
-                                        max="1"
-                                        step="0.05"
-                                        value={cardOpacity}
-                                        onChange={(e) => setCardOpacity(parseFloat(e.target.value))}
-                                        className="absolute w-[90px] cursor-pointer vertical-slider"
-                                        style={{
-                                            transform: "rotate(-90deg)",
-                                            height: "6px",
-                                            margin: 0,
-                                        }}
-                                    />
-                                </div>
-
-                                <span className="text-[10px] text-[#8E8980] font-mono tabular-nums leading-none">
-                                    {Math.round(cardOpacity * 100)}%
-                                </span>
-                            </div>
-
-                            {/* Right Column: Existing control panel content */}
-                            <div className="flex-1 flex flex-col justify-between gap-1.5">
+                            {/* Controls column */}
+                            <div className="flex-1 flex flex-col justify-between gap-1">
                                 {/* Sort mode toggle */}
-                                <div className="flex flex-col gap-1.5">
-                                    <div className="text-[11px] text-[#7A756E] tracking-wider uppercase mb-0.5">sort</div>
-                                    <button
-                                        onClick={() => setSortMode("suit")}
-                                        className={`w-full py-1.5 rounded-lg border text-[14px] font-semibold transition-all cursor-pointer ${sortMode === "suit"
-                                            ? "border-[#143A6C]/50 text-[#143A6C] bg-[#143A6C]/8"
-                                            : "border-[#D8D3C5] text-[#8E8980] hover:border-[#143A6C]/40 hover:text-[#143A6C]"
-                                            }`}
-                                    >
-                                        ♠♦♣♥ by suit
-                                    </button>
-                                    <button
-                                        onClick={() => setSortMode("rank")}
-                                        className={`w-full py-1.5 rounded-lg border text-[14px] font-semibold transition-all cursor-pointer ${sortMode === "rank"
-                                            ? "border-[#143A6C]/50 text-[#143A6C] bg-[#143A6C]/8"
-                                            : "border-[#D8D3C5] text-[#8E8980] hover:border-[#143A6C]/40 hover:text-[#143A6C]"
-                                            }`}
-                                    >
-                                        2→A by rank
-                                    </button>
-                                </div>
+                                {isMobile ? (
+                                    <div className="flex flex-col gap-1">
+                                        <button
+                                            onClick={() => setSortMode("suit")}
+                                            className={`flex-1 py-1 rounded-lg border text-[11px] font-semibold transition-all cursor-pointer ${sortMode === "suit"
+                                                ? "border-[#CE670E]/50 text-[#CE670E] bg-[#CE670E]/8"
+                                                : "border-[#D8D3C5] text-[#8E8980]"
+                                                }`}
+                                        >
+                                            ♠♦♣♥
+                                        </button>
+                                        <button
+                                            onClick={() => setSortMode("rank")}
+                                            className={`flex-1 py-1 rounded-lg border text-[11px] font-semibold transition-all cursor-pointer ${sortMode === "rank"
+                                                ? "border-[#CE670E]/50 text-[#CE670E] bg-[#CE670E]/8"
+                                                : "border-[#D8D3C5] text-[#8E8980]"
+                                                }`}
+                                        >
+                                            2→A
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col gap-1.5">
+                                        <div className="text-[11px] text-[#7A756E] tracking-wider uppercase mb-0.5">sort</div>
+                                        <button
+                                            onClick={() => setSortMode("suit")}
+                                            className={`w-full py-1.5 rounded-lg border text-[14px] font-semibold transition-all cursor-pointer ${sortMode === "suit"
+                                                ? "border-[#CE670E]/50 text-[#CE670E] bg-[#CE670E]/8"
+                                                : "border-[#D8D3C5] text-[#8E8980] hover:border-[#CE670E]/40 hover:text-[#CE670E]"
+                                                }`}
+                                        >
+                                            ♠♦♣♥ by suit
+                                        </button>
+                                        <button
+                                            onClick={() => setSortMode("rank")}
+                                            className={`w-full py-1.5 rounded-lg border text-[14px] font-semibold transition-all cursor-pointer ${sortMode === "rank"
+                                                ? "border-[#CE670E]/50 text-[#CE670E] bg-[#CE670E]/8"
+                                                : "border-[#D8D3C5] text-[#8E8980] hover:border-[#CE670E]/40 hover:text-[#CE670E]"
+                                                }`}
+                                        >
+                                            2→A by rank
+                                        </button>
+                                    </div>
+                                )}
 
                                 {/* Play Card button */}
                                 <button
                                     onClick={playCard}
                                     disabled={!canPlayCard}
-                                    className={`w-full py-2 rounded-lg border text-[15px] font-bold transition-all ${canPlayCard
+                                    className={`w-full ${isMobile ? "py-1.5 text-[13px]" : "py-2 text-[15px]"} rounded-lg border font-bold transition-all ${canPlayCard
                                         ? "border-green-400/50 text-green-400 bg-green-400/10 hover:bg-green-400/20 cursor-pointer"
-                                        : "border-white/20 text-white/30 cursor-not-allowed"
+                                        : "border-white/20 text-black/30 cursor-not-allowed"
                                         }`}
                                 >
                                     {room.gameOver ? "Game Over" : isMyPlayTurn ? (selectedCard ? "Play Card" : "Select a Card") : "Waiting..."}

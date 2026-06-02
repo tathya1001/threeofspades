@@ -17,4 +17,23 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: 'Akaya Kanadaka', sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+/* Safe area insets for notched phones */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Prevent pull-to-refresh and overscroll on the game table */
+.no-overscroll {
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+/* Prevent text selection on game elements */
+.no-select {
+  -webkit-user-select: none;
+  user-select: none;
 }
