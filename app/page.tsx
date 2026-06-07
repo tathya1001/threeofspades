@@ -270,12 +270,19 @@ export default function Home() {
 
             <div className="w-full max-w-[560px] rounded-[28px] p-8 sm:p-12 flex flex-col items-center relative z-10 transition-all duration-300">
 
-                {/* ═══ SCREEN 1: LANDING/MENU ═══ */}
                 {screen === "menu" && (
                     <>
-                        <h1 className="text-[3.6rem] text-[#2D2A26] font-bold mb-8 text-center tracking-wide leading-none">
+
+                        {/* <h1 className="text-[3.6rem] text-[#2D2A26] font-bold mb-8 text-center tracking-wide leading-none">
                             KINGS and <br /> REBELS
-                        </h1>
+                        </h1> */}
+                        <img
+                            src="/krlogo.svg"
+                            alt="Kings and Rebels Logo"
+                            className="w-full max-w-[360px] h-auto mb-8 select-none"
+                        />
+
+
 
                         <div className="w-full max-w-[360px] flex flex-col gap-2.5 mb-8">
                             {/* <label className="text-[1.1rem] text-[#8E8980] uppercase tracking-widest text-center font-bold">
