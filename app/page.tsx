@@ -253,20 +253,20 @@ export default function Home() {
             `}</style>
 
             {/* Background carousel */}
-            {/* <div
+            <div
                 style={{
                     position: "absolute",
                     inset: 0,
-                    backgroundImage: "url('/bgcards.png')",
+                    backgroundImage: "url('/homebg.svg')",
                     backgroundRepeat: "repeat-x",
                     backgroundSize: "auto 100%",
                     backgroundPosition: "center",
                     animation: "bg-scroll 90s linear infinite",
-                    opacity: 0.8,
+                    opacity: 0.025,
                     pointerEvents: "none",
                     zIndex: 0,
                 }}
-            /> */}
+            />
 
             <div className="w-full max-w-[560px] rounded-[28px] p-8 sm:p-12 flex flex-col items-center relative z-10 transition-all duration-300">
 

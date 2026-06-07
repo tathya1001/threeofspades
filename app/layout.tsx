@@ -22,8 +22,8 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Three of Spades",
-  description: "Three of Spades card game",
+  title: "Kings and Rebels",
+  description: "Kings and Rebels card game",
 };
 
 export default function RootLayout({
