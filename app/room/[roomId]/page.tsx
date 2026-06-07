@@ -34,6 +34,7 @@ interface RoomState {
     playerCards: Record<string, string[]>
     turningCards: string[]
     numTurningCards: number
+    turningCardPriorities?: number[]
     // Playing phase
     currentPlayerIndex: number
     currentTrick: TrickEntry[]
@@ -265,12 +266,13 @@ function CardHand({ cards, selectedCard, onSelectCard, opacity = 1, cardW = CARD
     )
 }
 
-function TurningCardBadge({ card }: { card: string }) {
+function TurningCardBadge({ card, priority }: { card: string; priority?: number }) {
     const p = parseCard(card)
     return (
-        <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/15 bg-white/5" style={{ minWidth: "56px" }}>
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[#D8D3C5] bg-[#FAF7F2]" style={{ minWidth: "56px" }}>
             <span style={{ color: p.color, fontSize: "15px", lineHeight: 1 }}>{p.symbol}</span>
             <span className="text-[15px] font-bold" style={{ color: p.color }}>{p.value}</span>
+            {priority != null && <span className="text-[12px] text-[#8E8980] font-semibold">({priority})</span>}
         </div>
     )
 }
@@ -286,16 +288,16 @@ function PartnerLadder({ thresholds, currentBid }: { thresholds: PartnerThreshol
                 return (
                     <div
                         key={partners}
-                        className={`flex items-center justify-between rounded-lg px-3 py-1.5 border transition-all duration-200 ${isCurrent ? "border-[#c6acff]/50 bg-[#c6acff]/10" :
-                            active ? "border-green-500/30 bg-green-500/5" :
-                                "border-white/10 opacity-50"
+                        className={`flex items-center justify-between rounded-lg px-3 py-1.5 border transition-all duration-200 ${isCurrent ? "border-[#CE670E]/50 bg-[#CE670E]/10" :
+                            active ? "border-green-600/40 bg-green-600/8" :
+                                "border-[#D8D3C5] opacity-60"
                             }`}
                     >
-                        <span className={`text-[13px] ${isCurrent ? "text-[#c6acff]" : active ? "text-green-400/70" : "text-white/35"}`}>
+                        <span className={`text-[13px] ${isCurrent ? "text-[#CE670E] font-semibold" : active ? "text-green-700" : "text-[#8E8980]"}`}>
                             {partners} partner{partners !== 1 ? "s" : ""}
                             <span className="ml-1 opacity-60">· {partners} card{partners !== 1 ? "s" : ""}</span>
                         </span>
-                        <span className={`text-[15px] font-bold tabular-nums ${isCurrent ? "text-[#c6acff]" : active ? "text-green-400/80" : "text-white/30"}`}>
+                        <span className={`text-[15px] font-bold tabular-nums ${isCurrent ? "text-[#CE670E]" : active ? "text-green-700" : "text-[#8E8980]"}`}>
                             {threshold}
                         </span>
                     </div>
@@ -419,7 +421,16 @@ export default function Room() {
     const numTC = room.numTurningCards ?? 1
     const tcSlots = turningSelections.slice(0, numTC)
     const needsPriority = (room.numDecks ?? 1) >= 2
-    const allTCDone = tcSlots.every(s => s.suit !== "" && s.rank !== "" && (!needsPriority || s.priority !== ""))
+    const allTCDone = tcSlots.every(s => {
+        if (s.suit === "" || s.rank === "") return false
+        if (!needsPriority) return true
+        if (s.priority === "") return false
+        if (s.priority === "0") {
+            const card = s.rank + s.suit
+            return myCards.includes(card)
+        }
+        return true
+    })
     const canConfirm = !!selectedSuit && allTCDone
 
     const HAND_H = mCardH + 40     // card height + label + padding
@@ -434,7 +445,15 @@ export default function Room() {
     // ── Actions ────────────────────────────────────────────────────────────
     const giveCards = () => socket.emit("give-cards", roomId)
     const startBidding = () => socket.emit("start-bidding", roomId)
-    const placeBid = (inc: number) => socket.emit("place-bid", { roomId, amount: room.highestBid + inc })
+    const isHostFirstTurn = isHost && !room.highestBidderId && room.currentBidderIndex === room.players.findIndex(p => p.id === effectiveMyId)
+    const placeBid = (inc: number) => {
+        if (isHostFirstTurn) {
+            // Host's first turn: only place the base (minBid) amount, ignore increment
+            socket.emit("place-bid", { roomId, amount: room.minBid })
+        } else {
+            socket.emit("place-bid", { roomId, amount: room.highestBid + inc })
+        }
+    }
     const forfeitBid = () => socket.emit("forfeit-bid", roomId)
 
     const playCard = () => {
@@ -457,7 +476,13 @@ export default function Room() {
     const setTurningCard = (idx: number, field: "suit" | "rank" | "priority", value: string) =>
         setTurningSelections(prev => {
             const next = [...prev]
-            next[idx] = { ...next[idx], [field]: value }
+            const updatedItem = { ...next[idx], [field]: value }
+            const card = (updatedItem.rank ?? "") + (updatedItem.suit ?? "")
+            const hasCard = card.length === 2 && myCards.includes(card)
+            if (updatedItem.priority === "0" && !hasCard) {
+                updatedItem.priority = ""
+            }
+            next[idx] = updatedItem
             return next
         })
 
@@ -760,18 +785,27 @@ export default function Room() {
                                     <p className="text-[#8E8980] text-lg italic">you forfeited.</p>
                                 ) : (
                                     <div className="flex flex-col gap-2.5">
-                                        <div className="grid grid-cols-2 gap-2">
-                                            {[5, 10, 15, 20].map(inc => (
-                                                <button
-                                                    key={inc}
-                                                    onClick={() => placeBid(inc)}
-                                                    disabled={!isMyTurn}
-                                                    className="py-2.5 border border-[#D8D3C5] rounded-lg text-[#2D2A26] bg-[#FDFCFB] text-xl font-semibold hover:bg-[#EBE7DC] disabled:opacity-10 transition-colors cursor-pointer"
-                                                >
-                                                    +{inc}
-                                                </button>
-                                            ))}
-                                        </div>
+                                        {isHostFirstTurn && isMyTurn ? (
+                                            <button
+                                                onClick={() => placeBid(0)}
+                                                className="w-full py-3 border border-[#CE670E]/40 rounded-lg text-[#CE670E] bg-[#CE670E]/5 text-xl font-bold hover:bg-[#CE670E]/10 transition-colors cursor-pointer"
+                                            >
+                                                Bid {room.minBid}
+                                            </button>
+                                        ) : (
+                                            <div className="grid grid-cols-2 gap-2">
+                                                {[5, 10, 15, 20].map(inc => (
+                                                    <button
+                                                        key={inc}
+                                                        onClick={() => placeBid(inc)}
+                                                        disabled={!isMyTurn}
+                                                        className="py-2.5 border border-[#D8D3C5] rounded-lg text-[#2D2A26] bg-[#FDFCFB] text-xl font-semibold hover:bg-[#EBE7DC] disabled:opacity-10 transition-colors cursor-pointer"
+                                                    >
+                                                        +{inc}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
                                         <button
                                             onClick={forfeitBid}
                                             disabled={!canForfeit}
@@ -852,19 +886,24 @@ export default function Room() {
                                                                 <option key={r.value} value={r.value}>{r.label}</option>
                                                             ))}
                                                         </select>
-                                                        {needsPriority && (
-                                                            <select
-                                                                value={turningSelections[idx]?.priority ?? ""}
-                                                                onChange={e => setTurningCard(idx, "priority", e.target.value)}
-                                                                className="card-select"
-                                                                style={{ maxWidth: "64px" }}
-                                                            >
-                                                                <option value="">#</option>
-                                                                {Array.from({ length: room.numDecks }, (_, i) => (
-                                                                    <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
-                                                                ))}
-                                                            </select>
-                                                        )}
+                                                        {needsPriority && (() => {
+                                                            const selCard = (turningSelections[idx]?.rank ?? "") + (turningSelections[idx]?.suit ?? "")
+                                                            const hasThisCard = selCard.length === 2 && myCards.includes(selCard)
+                                                            return (
+                                                                <select
+                                                                    value={turningSelections[idx]?.priority ?? ""}
+                                                                    onChange={e => setTurningCard(idx, "priority", e.target.value)}
+                                                                    className="card-select"
+                                                                    style={{ maxWidth: "64px" }}
+                                                                >
+                                                                    <option value="">#</option>
+                                                                    {hasThisCard && <option value="0">0</option>}
+                                                                    {Array.from({ length: room.numDecks }, (_, i) => (
+                                                                        <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
+                                                                    ))}
+                                                                </select>
+                                                            )
+                                                        })()}
                                                     </div>
                                                 ))}
                                             </div>
@@ -927,7 +966,7 @@ export default function Room() {
                                             <div className="text-[13px] text-[#8E8980] mb-2">turning cards</div>
                                             <div className="flex flex-wrap gap-2">
                                                 {room.turningCards.map((card, i) => (
-                                                    <TurningCardBadge key={`${card}-${i}`} card={card} />
+                                                    <TurningCardBadge key={`${card}-${i}`} card={card} priority={room.turningCardPriorities?.[i]} />
                                                 ))}
                                             </div>
                                         </div>
@@ -987,12 +1026,22 @@ export default function Room() {
                                     </div>
                                 </div>
 
-                                {room.gameOver && (
-                                    <div className="border border-green-500/30 bg-green-50 rounded-lg px-3 py-2.5 text-center">
-                                        <div className="text-green-700 font-bold text-lg">Game Over</div>
-                                        <div className="text-[13px] text-[#8E8980] mt-1 font-semibold">All cards played</div>
-                                    </div>
-                                )}
+                                {/* {room.gameOver && (() => {
+                                    const rebelsThreshold = room.highestBid || 250
+                                    const kingsThreshold = (room.maxPoints || 250) - rebelsThreshold + 5
+                                    const rebelsPts = getTeamPts("red")
+                                    const kingsPts = getTeamPts("blue")
+                                    const rebelsWon = rebelsPts >= rebelsThreshold
+                                    const kingsWon = kingsPts >= kingsThreshold
+                                    return (
+                                        <div className="border border-green-500/30 bg-green-50 rounded-lg px-3 py-2.5 text-center">
+                                            <div className="text-green-700 font-bold text-lg">Game Over</div>
+                                            <div className="text-[13px] text-[#8E8980] mt-1 font-semibold">
+                                                {rebelsWon ? "Rebels won!" : kingsWon ? "Kings won!" : "All cards played"}
+                                            </div>
+                                        </div>
+                                    )
+                                })()} */}
                             </div>
                         )}
                     </>
@@ -1006,7 +1055,7 @@ export default function Room() {
                             <div className="flex items-center gap-3">
                                 <AvatarIcon dress={room.playerDresses?.[effectiveMyId]} color={room.playerColors?.[effectiveMyId] || "#2D2A26"} size={40} />
                                 <span className="font-semibold text-[15px] truncate max-w-[80px]">
-                                    {myName || "You"}
+                                    You
                                 </span>
                             </div>
                             <button
@@ -1148,13 +1197,15 @@ export default function Room() {
                                     boxShadow: "0 8px 48px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.02)",
                                 }}
                             >
-                                <button
-                                    onClick={() => setShowTrickPopup(false)}
-                                    className="absolute top-3 right-4 text-[#8E8980] hover:text-[#2D2A26] transition-colors text-xl font-bold cursor-pointer"
-                                    aria-label="Close"
-                                >
-                                    ✕
-                                </button>
+                                {!isHost && (
+                                    <button
+                                        onClick={() => setShowTrickPopup(false)}
+                                        className="absolute top-3 right-4 text-[#8E8980] hover:text-[#2D2A26] transition-colors text-xl font-bold cursor-pointer"
+                                        aria-label="Close"
+                                    >
+                                        ✕
+                                    </button>
+                                )}
                                 <div className="text-[13px] tracking-[0.2em] uppercase text-[#8E8980]">hand won</div>
                                 <div
                                     className={`${isMobile ? "text-xl" : "text-3xl"} drop-shadow-[0_0_18px_rgba(0,0,0,0.05)] text-center text-[#2D2A26]`}
@@ -1174,6 +1225,40 @@ export default function Room() {
                             </div>
                         </div>
                     )}
+
+                    {/* ── FULLSCREEN WIN OVERLAY ──────────────────────── */}
+                    {room.phase === "playing" && room.gameOver && (() => {
+                        const rebelsThreshold = room.highestBid || 250
+                        const kingsThreshold = (room.maxPoints || 250) - rebelsThreshold + 5
+                        const rebelsPts = getTeamPts("red")
+                        const kingsPts = getTeamPts("blue")
+                        const rebelsWon = rebelsPts >= rebelsThreshold
+                        const kingsWon = kingsPts >= kingsThreshold || (room.gameOver && rebelsPts < rebelsThreshold)
+                        if (!rebelsWon && !kingsWon) return null
+                        const winColor = rebelsWon ? "#DC2626" : "#2563EB"
+                        const winText = rebelsWon ? "REBELS WON" : "KINGS WON"
+                        return (
+                            <div
+                                className="absolute inset-0 z-[100] flex items-center justify-center"
+                                style={{ background: winColor }}
+                            >
+                                <div className="flex flex-col items-center gap-4 animate-deal-in">
+                                    <div
+                                        className="text-white font-black tracking-[0.15em] uppercase text-center select-none"
+                                        style={{ fontSize: isMobile ? "3rem" : "5rem", textShadow: "0 4px 32px rgba(0,0,0,0.3)" }}
+                                    >
+                                        {winText}
+                                    </div>
+                                    <div className="text-white/70 text-lg font-semibold tracking-wide">
+                                        {rebelsWon
+                                            ? `Rebels scored ${rebelsPts} / ${rebelsThreshold}`
+                                            : `Kings scored ${kingsPts} / ${kingsThreshold}`
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        )
+                    })()}
                 </div>
 
                 {/* ── BOTTOM STRIP: hand + right control panel ────────── */}

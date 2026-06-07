@@ -422,9 +422,15 @@ io.on("connection", (socket) => {
         if (multiDeck) {
             // With multiple decks, priorities are required to disambiguate duplicate cards
             if (!Array.isArray(priorities) || priorities.length !== needed) return
-            // Validate each priority is between 1 and numDecks
-            for (const p of priorities) {
-                if (typeof p !== "number" || p < 1 || p > room.numDecks) return
+            // Validate each priority is between 0 and numDecks (0 is only allowed if selector has the card)
+            for (let i = 0; i < needed; i++) {
+                const p = priorities[i]
+                const c = turningCards[i]
+                if (typeof p !== "number" || p < 0 || p > room.numDecks) return
+                if (p === 0) {
+                    const hand = room.playerCards[socket.id] || []
+                    if (!hand.includes(c)) return
+                }
             }
             // Uniqueness check: card + priority pairs must be unique
             const combos = turningCards.map((c, i) => `${c}:${priorities[i]}`)
@@ -503,11 +509,19 @@ io.on("connection", (socket) => {
             const playCount = room.turningCardPlayCounts[card]
 
             if (multiDeck && room.turningCardPriorities) {
-                // Check if any turning card entry matches this card AND the current play count matches its priority
+                // Check if any turning card entry matches this card AND (current play count matches priority OR priority is 0 and player is not the bidder)
                 for (let ti = 0; ti < room.turningCards.length; ti++) {
-                    if (room.turningCards[ti] === card && room.turningCardPriorities[ti] === playCount) {
-                        room.playerTeams[socket.id] = "red"
-                        break
+                    if (room.turningCards[ti] === card) {
+                        const pri = room.turningCardPriorities[ti]
+                        if (pri === 0) {
+                            if (socket.id !== room.highestBidderId) {
+                                room.playerTeams[socket.id] = "red"
+                                break
+                            }
+                        } else if (pri === playCount) {
+                            room.playerTeams[socket.id] = "red"
+                            break
+                        }
                     }
                 }
             } else {
@@ -542,11 +556,34 @@ io.on("connection", (socket) => {
             const winnerIdx = room.players.findIndex(p => p.id === winner.playerId)
             room.currentPlayerIndex = winnerIdx >= 0 ? winnerIdx : 0
 
-            // Pause here — keep cards on table, wait for host to fire next-hand
-            room.trickPending = true
-            room.handNumber++
+            // Check if game over (either team reached threshold)
+            const rebelsThreshold = room.highestBid || 250
+            const kingsThreshold = (room.maxPoints || 250) - rebelsThreshold + 5
 
-            console.log(`${roomId} then trick #${room.handNumber - 1} won by ${winner.playerId} (+${trickPoints}pts) [pending]`)
+            const rebelsPts = room.players
+                .filter(p => room.playerTeams[p.id] === "red")
+                .reduce((sum, p) => sum + (room.playerPoints[p.id] || 0), 0)
+
+            const kingsPts = room.players
+                .filter(p => {
+                    if (p.id === room.highestBidderId) return false
+                    if (room.playerTeams[p.id] === "red") return false
+                    const hand = room.playerCards[p.id] || []
+                    const hasTurning = hand.some(c => room.turningCards.includes(c))
+                    return !hasTurning
+                })
+                .reduce((sum, p) => sum + (room.playerPoints[p.id] || 0), 0)
+
+            if (rebelsPts >= rebelsThreshold || kingsPts >= kingsThreshold) {
+                room.gameOver = true
+                room.trickPending = false
+                console.log(`${roomId} then GAME OVER (threshold met) | Rebels: ${rebelsPts}/${rebelsThreshold}, Kings: ${kingsPts}/${kingsThreshold}`)
+            } else {
+                // Pause here — keep cards on table, wait for host to fire next-hand
+                room.trickPending = true
+                room.handNumber++
+                console.log(`${roomId} then trick #${room.handNumber - 1} won by ${winner.playerId} (+${trickPoints}pts) [pending]`)
+            }
         } else {
             // Advance to next player clockwise
             room.currentPlayerIndex = (room.currentPlayerIndex + 1) % room.players.length
