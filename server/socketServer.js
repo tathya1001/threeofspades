@@ -555,35 +555,10 @@ io.on("connection", (socket) => {
             // Winner leads next trick
             const winnerIdx = room.players.findIndex(p => p.id === winner.playerId)
             room.currentPlayerIndex = winnerIdx >= 0 ? winnerIdx : 0
-
-            // Check if game over (either team reached threshold)
-            const rebelsThreshold = room.highestBid || 250
-            const kingsThreshold = (room.maxPoints || 250) - rebelsThreshold + 5
-
-            const rebelsPts = room.players
-                .filter(p => room.playerTeams[p.id] === "red")
-                .reduce((sum, p) => sum + (room.playerPoints[p.id] || 0), 0)
-
-            const kingsPts = room.players
-                .filter(p => {
-                    if (p.id === room.highestBidderId) return false
-                    if (room.playerTeams[p.id] === "red") return false
-                    const hand = room.playerCards[p.id] || []
-                    const hasTurning = hand.some(c => room.turningCards.includes(c))
-                    return !hasTurning
-                })
-                .reduce((sum, p) => sum + (room.playerPoints[p.id] || 0), 0)
-
-            if (rebelsPts >= rebelsThreshold || kingsPts >= kingsThreshold) {
-                room.gameOver = true
-                room.trickPending = false
-                console.log(`${roomId} then GAME OVER (threshold met) | Rebels: ${rebelsPts}/${rebelsThreshold}, Kings: ${kingsPts}/${kingsThreshold}`)
-            } else {
-                // Pause here — keep cards on table, wait for host to fire next-hand
-                room.trickPending = true
-                room.handNumber++
-                console.log(`${roomId} then trick #${room.handNumber - 1} won by ${winner.playerId} (+${trickPoints}pts) [pending]`)
-            }
+            // Pause here — keep cards on table, wait for host to fire next-hand
+            room.trickPending = true
+            room.handNumber++
+            console.log(`${roomId} then trick #${room.handNumber - 1} won by ${winner.playerId} (+${trickPoints}pts) [pending]`)
         } else {
             // Advance to next player clockwise
             room.currentPlayerIndex = (room.currentPlayerIndex + 1) % room.players.length
