@@ -1,11 +1,11 @@
 "use client"
 import React, { useEffect, useState, useRef } from "react"
 import { socket } from "../../../lib/socket"
-import { useParams, useSearchParams } from "next/navigation"
+import { useParams, useSearchParams, useRouter } from "next/navigation"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Player { id: string; name: string }
+interface Player { id: string; name: string; offline?: boolean }
 interface PartnerThreshold { partners: number; threshold: number }
 
 interface TrickEntry { playerId: string; card: string }
@@ -321,6 +321,7 @@ function AvatarIcon({ dress, color, size = 54 }: { dress?: string; color?: strin
 export default function Room() {
     const params = useParams()
     const search = useSearchParams()
+    const router = useRouter()
     const roomId = params.roomId as string
     const myName = (search.get("name") ?? "").trim()
 
@@ -369,6 +370,14 @@ export default function Room() {
         const getToken = () => { try { return localStorage.getItem(tokenKey) ?? undefined } catch { return undefined } }
         const saveToken = (t: string) => { try { localStorage.setItem(tokenKey, t) } catch { /* ignore */ } }
 
+        // Persist room + name so the home page can offer a quick rejoin
+        try {
+            if (myName) {
+                localStorage.setItem("tos_last_room_id", roomId)
+                localStorage.setItem("tos_last_name", myName)
+            }
+        } catch { /* ignore */ }
+
         const onConnect = () => {
             if (socket.id) { initId(socket.id); socket.emit("join-room", { roomId, name: myName, token: getToken() }) }
         }
@@ -377,16 +386,22 @@ export default function Room() {
             if (!myIdRef.current && socket.id) initId(socket.id)
             setRoom(safeRoom(updated))
         }
+        const onRoomError = (msg: string) => {
+            alert(`Room error: ${msg}`)
+            router.push("/")
+        }
         socket.on("connect", onConnect)
         socket.on("session-token", onSessionToken)
         socket.on("room-update", onRoomUpdate)
+        socket.on("room-error", onRoomError)
         socket.emit("join-room", { roomId, name: myName, token: getToken() })
         return () => {
             socket.off("connect", onConnect)
             socket.off("session-token", onSessionToken)
             socket.off("room-update", onRoomUpdate)
+            socket.off("room-error", onRoomError)
         }
-    }, [roomId, myName, tokenKey])
+    }, [roomId, myName, tokenKey, router])
 
     // Delay the trick popup by 2 s so the last card is visible first
     useEffect(() => {
@@ -1133,11 +1148,12 @@ export default function Room() {
                         const cardCount = room.playerCards?.[player.id]?.length ?? 0
                         const playerTricks = room.playerTricks?.[player.id] ?? 0
                         const playerPts = room.playerPoints?.[player.id] ?? 0
+                        const isOffline = !!player.offline
 
                         return (
                             <div
                                 key={player.id}
-                                className={`absolute flex flex-col items-center gap-0.5 ${isMobile ? "min-w-[60px]" : "min-w-[88px]"} transition-opacity duration-300`}
+                                className={`absolute flex flex-col items-center gap-0.5 ${isMobile ? "min-w-[60px]" : "min-w-[88px]"} transition-opacity duration-300 ${isOffline ? "opacity-40 grayscale" : ""}`}
                                 style={{ left: `${pos.x}%`, top: `${pos.y}%`, transform: "translate(-50%, -50%)" }}
                             >
                                 <div
@@ -1153,6 +1169,13 @@ export default function Room() {
                                     {displayName}
                                     {isPlayerHost && <span className="text-xs ml-1 opacity-50">(host)</span>}
                                 </div>
+
+                                {/* Offline badge */}
+                                {isOffline && (
+                                    <span className={`${isMobile ? "text-[10px]" : "text-[11px]"} text-orange-600 border border-orange-400/40 bg-orange-50 rounded px-1.5 py-px font-semibold animate-pulse`}>
+                                        offline
+                                    </span>
+                                )}
 
                                 {room.phase === "playing" ? (
                                     <div className={`${isMobile ? "text-[11px]" : "text-[14px]"} text-[#8E8980] font-semibold tracking-wide mt-0.5`}>

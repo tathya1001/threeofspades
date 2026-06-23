@@ -12,6 +12,10 @@ const { randomUUID } = require("crypto")
 
 let rooms = {}
 
+// Track pending disconnect cleanup timers (socketId -> timeout)
+const disconnectTimeouts = {}
+const RECONNECT_GRACE_MS = 15000  // 15 second grace window
+
 const MAX_N = { 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5, 9: 6, 10: 6 }
 
 function mround(value, multiple) {
@@ -214,42 +218,73 @@ io.on("connection", (socket) => {
         let finalName = playerName
         if (!finalName && socket.id === room.hostId) finalName = room.hostName
 
+        if (!finalName) {
+            socket.emit("room-error", "A name is required to join this room.");
+            return
+        }
+
         const alreadyJoined = room.players.find(p => p.id === socket.id)
         const sameNamePlayer = finalName ? room.players.find(p => p.name === finalName && p.id !== socket.id) : null
 
         if (sameNamePlayer) {
             // Someone else has claimed this name — verify token
             if (!token || token !== sameNamePlayer.token) {
-                // Wrong or missing token: join as spectator (no id swap, no card access)
-                socket.join(roomId)
-                socket.emit("room-update", { ...room, playerCards: {} })
+                socket.emit("room-error", "This name is already taken in this room.");
                 return
             }
-            // Valid token — hand over the seat to the new socket
+
+            // ── RECONNECT: valid token → restore seat to new socket ──
+            const oldId = sameNamePlayer.id
+
+            // Clear any pending offline cleanup timer for this player
+            if (disconnectTimeouts[oldId]) {
+                clearTimeout(disconnectTimeouts[oldId])
+                delete disconnectTimeouts[oldId]
+            }
+
+            // Swap the socket id and mark player back online
             sameNamePlayer.id = socket.id
-            sameNamePlayer.token = token
+            sameNamePlayer.offline = false
+
+            // Transfer host / trump selector ownership
             if (room.hostName === finalName) room.hostId = socket.id
-            if (room.trumpSelectorId === sameNamePlayer.id) room.trumpSelectorId = socket.id
-            // Move playerCards to new socket id
-            if (room.playerCards[sameNamePlayer.id]) {
-                room.playerCards[socket.id] = room.playerCards[sameNamePlayer.id]
-                delete room.playerCards[sameNamePlayer.id]
+            if (room.trumpSelectorId === oldId) room.trumpSelectorId = socket.id
+
+            // Transfer all id-keyed state maps
+            const maps = ["playerCards", "playerColors", "playerTeams", "playerDresses", "playerTricks", "playerPoints"]
+            for (const map of maps) {
+                if (room[map] && room[map][oldId] !== undefined) {
+                    room[map][socket.id] = room[map][oldId]
+                    delete room[map][oldId]
+                }
             }
-            if (room.playerColors[sameNamePlayer.id]) {
-                room.playerColors[socket.id] = room.playerColors[sameNamePlayer.id]
-                delete room.playerColors[sameNamePlayer.id]
+
+            // Fix forfeited list
+            room.forfeited = room.forfeited.map(id => id === oldId ? socket.id : id)
+
+            // Fix currentTrick entries
+            if (room.currentTrick) {
+                room.currentTrick = room.currentTrick.map(entry =>
+                    entry.playerId === oldId ? { ...entry, playerId: socket.id } : entry
+                )
             }
-            if (room.playerTeams[sameNamePlayer.id]) {
-                room.playerTeams[socket.id] = room.playerTeams[sameNamePlayer.id]
-                delete room.playerTeams[sameNamePlayer.id]
-            }
-            if (room.playerDresses[sameNamePlayer.id]) {
-                room.playerDresses[socket.id] = room.playerDresses[sameNamePlayer.id]
-                delete room.playerDresses[sameNamePlayer.id]
-            }
+
+            // Fix lastTrickWinner
+            if (room.lastTrickWinner === oldId) room.lastTrickWinner = socket.id
+
+            // Fix highestBidderId
+            if (room.highestBidderId === oldId) room.highestBidderId = socket.id
+
             socket.join(roomId)
             socket.emit("session-token", token)
+            console.log(`[reconnect] "${finalName}" rejoined ${roomId} (${oldId} → ${socket.id})`)
             io.to(roomId).emit("room-update", room)
+            return
+        }
+
+        // If game has started, only allow reconnects (handled above by sameNamePlayer block)
+        if (room.phase !== "waiting" && !alreadyJoined) {
+            socket.emit("room-error", "Game is already in progress.");
             return
         }
 
@@ -300,6 +335,8 @@ io.on("connection", (socket) => {
         const room = rooms[roomId]
         if (!room) return
         safeRoom(room)
+        const player = room.players.find(p => p.id === socket.id)
+        if (!player) return
         room.playerDresses[socket.id] = dress
         io.to(roomId).emit("room-update", room)
     })
@@ -599,33 +636,55 @@ io.on("connection", (socket) => {
             if (!room) continue
             safeRoom(room)
 
-            const wasCurrentBidder = room.players[room.currentBidderIndex]?.id === socket.id
-            const wasHost = room.hostId === socket.id
+            const player = room.players.find(p => p.id === socket.id)
+            if (!player) continue
 
-            room.players = room.players.filter(p => p.id !== socket.id)
-            room.forfeited = room.forfeited.filter(id => id !== socket.id)
-            if (room.playerCards[socket.id]) delete room.playerCards[socket.id]
-
-            if (room.players.length === 0) { delete rooms[roomId]; continue }
-            if (wasHost) { room.hostId = room.players[0].id; room.hostName = room.players[0].name }
-
-            if (room.phase === "bidding") {
-                const active = getActiveBidders(room)
-                if (active.length === 1 && room.highestBidderId) {
-                    room.phase = "trump-selection"
-                    room.trumpSelectorId = active[0].id
-                } else if (wasCurrentBidder && room.players.length > 0) {
-                    room.currentBidderIndex = room.currentBidderIndex % room.players.length
-                    advanceTurn(room)
-                }
-            }
-
-            if (room.phase === "trump-selection" && room.trumpSelectorId === socket.id) {
-                const active = getActiveBidders(room)
-                if (active.length > 0) room.trumpSelectorId = active[0].id
-            }
-
+            // Mark player as offline but keep them in the room for RECONNECT_GRACE_MS
+            player.offline = true
+            console.log(`[offline] "${player.name}" went offline in ${roomId} — grace period starts`)
             io.to(roomId).emit("room-update", room)
+
+            // Schedule permanent removal if they don't come back
+            disconnectTimeouts[socket.id] = setTimeout(() => {
+                delete disconnectTimeouts[socket.id]
+
+                const r = rooms[roomId]
+                if (!r) return
+                safeRoom(r)
+
+                // Confirm player still has this socket id (they haven't reconnected with a new socket yet)
+                const stillOffline = r.players.find(p => p.id === socket.id && p.offline)
+                if (!stillOffline) return
+
+                const wasCurrentBidder = r.players[r.currentBidderIndex]?.id === socket.id
+                const wasHost = r.hostId === socket.id
+
+                r.players = r.players.filter(p => p.id !== socket.id)
+                r.forfeited = r.forfeited.filter(id => id !== socket.id)
+                if (r.playerCards[socket.id]) delete r.playerCards[socket.id]
+
+                if (r.players.length === 0) { delete rooms[roomId]; return }
+                if (wasHost) { r.hostId = r.players[0].id; r.hostName = r.players[0].name }
+
+                if (r.phase === "bidding") {
+                    const active = getActiveBidders(r)
+                    if (active.length === 1 && r.highestBidderId) {
+                        r.phase = "trump-selection"
+                        r.trumpSelectorId = active[0].id
+                    } else if (wasCurrentBidder && r.players.length > 0) {
+                        r.currentBidderIndex = r.currentBidderIndex % r.players.length
+                        advanceTurn(r)
+                    }
+                }
+
+                if (r.phase === "trump-selection" && r.trumpSelectorId === socket.id) {
+                    const active = getActiveBidders(r)
+                    if (active.length > 0) r.trumpSelectorId = active[0].id
+                }
+
+                console.log(`[removed] "${stillOffline.name}" permanently removed from ${roomId} after grace period`)
+                io.to(roomId).emit("room-update", r)
+            }, RECONNECT_GRACE_MS)
         }
     })
 

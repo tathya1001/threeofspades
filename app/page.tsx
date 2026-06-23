@@ -35,6 +35,7 @@ export default function Home() {
     const [screen, setScreen] = useState<"menu" | "host" | "join">("menu")
     const [name, setName] = useState("")
     const [roomId, setRoomId] = useState("")
+    const [savedRoomId, setSavedRoomId] = useState<string | null>(null)
     const [gameMode, setGameMode] = useState<"standard" | "custom">("standard")
 
     // Standard mode state
@@ -50,6 +51,16 @@ export default function Home() {
     >([])
 
     const router = useRouter()
+
+    // Load saved session from localStorage on mount
+    useEffect(() => {
+        try {
+            const savedName = localStorage.getItem("tos_last_name") ?? ""
+            const savedRoom = localStorage.getItem("tos_last_room_id") ?? ""
+            if (savedName) setName(savedName)
+            if (savedRoom) setSavedRoomId(savedRoom)
+        } catch { /* ignore */ }
+    }, [])
 
     const maxPoints = customDecks === 2 ? 500 : 250
 
@@ -93,7 +104,7 @@ export default function Home() {
     const createRoom = () => {
         if (gameMode === "standard") {
             socket.emit("create-room", { name, numPlayers, numDecks }, (roomId: string) => {
-                router.push(`/room/${roomId}`)
+                router.push(`/room/${roomId}?name=${encodeURIComponent(name)}`)
             })
         } else {
             socket.emit("create-room", {
@@ -104,7 +115,7 @@ export default function Home() {
                 customMinBid,
                 customPartnerThresholds: customThresholds,
             }, (roomId: string) => {
-                router.push(`/room/${roomId}`)
+                router.push(`/room/${roomId}?name=${encodeURIComponent(name)}`)
             })
         }
     }
@@ -319,6 +330,19 @@ export default function Home() {
                                 {/* <span className="text-[0.85rem] text-[#8E8980] font-normal tracking-wide">Enter code</span> */}
                             </button>
                         </div>
+
+                        {/* Rejoin last room button */}
+                        {savedRoomId && name.trim() && (
+                            <button
+                                onClick={() => router.push(`/room/${savedRoomId}?name=${encodeURIComponent(name.trim())}`)}
+                                className="w-full max-w-[360px] flex items-center justify-center gap-2 py-3 px-5 rounded-[16px] border border-dashed border-[#CE670E]/40 text-[#CE670E]/70 text-[1.1rem] font-semibold hover:bg-[#CE670E]/5 hover:border-[#CE670E]/70 hover:text-[#CE670E] active:scale-95 transition-all cursor-pointer mt-1"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 shrink-0">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                                </svg>
+                                Rejoin <span className="font-bold tracking-widest">{savedRoomId}</span>
+                            </button>
+                        )}
                     </>
                 )}
 
