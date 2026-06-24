@@ -380,7 +380,8 @@ io.on("connection", (socket) => {
         if (room.players.length !== room.targetPlayers) return
         if (!room.cardsDealt) return
 
-        room.phase = "bidding"
+        // Move to pre-bidding: players pass or open the bid
+        room.phase = "pre-bidding"
         room.highestBid = room.minBid - 5
         room.highestBidderId = null
         room.highestBidderName = null
@@ -390,6 +391,54 @@ io.on("connection", (socket) => {
         room.numPartners = 1
         room.numTurningCards = 1
 
+        io.to(roomId).emit("room-update", room)
+    })
+
+    // Pass during pre-bidding — just advance turn, no elimination
+    socket.on("pass-prebid", (roomId) => {
+        const room = rooms[roomId]
+        if (!room || room.phase !== "pre-bidding") return
+        safeRoom(room)
+
+        const bidder = room.players[room.currentBidderIndex]
+        if (!bidder || bidder.id !== socket.id) return
+
+        advanceTurn(room)
+        io.to(roomId).emit("room-update", room)
+    })
+
+    // Open the bid — any player on their pre-bid turn can start bidding
+    // extra: optional additional points above minBid (must be multiple of 5)
+    socket.on("open-bid", ({ roomId, extra }) => {
+        const room = rooms[roomId]
+        if (!room || room.phase !== "pre-bidding") return
+        safeRoom(room)
+
+        const bidder = room.players[room.currentBidderIndex]
+        if (!bidder || bidder.id !== socket.id) return
+
+        const safeExtra = (typeof extra === "number" && extra >= 0 && extra % 5 === 0) ? extra : 0
+        const openingBid = room.minBid + safeExtra
+
+        room.phase = "bidding"
+        room.highestBid = openingBid
+        room.highestBidderId = socket.id
+        room.highestBidderName = bidder.name
+
+        // Live update partners for the opening bid
+        room.numPartners = getNumPartnersForBid(openingBid, room.targetPlayers, room.numDecks)
+        room.numTurningCards = room.numPartners
+
+        // Check if only one player (edge case)
+        const active = getActiveBidders(room)
+        if (active.length === 1) {
+            room.phase = "trump-selection"
+            room.trumpSelectorId = socket.id
+            io.to(roomId).emit("room-update", room)
+            return
+        }
+
+        advanceTurn(room)
         io.to(roomId).emit("room-update", room)
     })
 
@@ -430,7 +479,7 @@ io.on("connection", (socket) => {
         const bidder = room.players[room.currentBidderIndex]
         if (!bidder || bidder.id !== socket.id) return
         if (room.forfeited.includes(socket.id)) return
-        if (!room.highestBidderId) return
+        if (!room.highestBidderId) return  // can't forfeit before anyone has bid
 
         room.forfeited.push(socket.id)
 
@@ -665,6 +714,13 @@ io.on("connection", (socket) => {
 
                 if (r.players.length === 0) { delete rooms[roomId]; return }
                 if (wasHost) { r.hostId = r.players[0].id; r.hostName = r.players[0].name }
+
+                if (r.phase === "pre-bidding") {
+                    if (wasCurrentBidder && r.players.length > 0) {
+                        r.currentBidderIndex = r.currentBidderIndex % r.players.length
+                        advanceTurn(r)
+                    }
+                }
 
                 if (r.phase === "bidding") {
                     const active = getActiveBidders(r)

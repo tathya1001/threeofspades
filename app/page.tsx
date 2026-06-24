@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { socket } from "../lib/socket"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 
 const MAX_N: Record<number, number> = { 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5, 9: 6, 10: 6 }
 
@@ -278,6 +279,17 @@ export default function Home() {
                     zIndex: 0,
                 }}
             />
+
+            {/* Rules button */}
+            <Link
+                href="/rules"
+                className="fixed top-5 right-5 z-20 flex items-center gap-2 px-4 py-2 rounded-full border border-[#D8D3C5] bg-[#F3EFE6]/80 backdrop-blur-sm text-[#5C5751] text-[0.95rem] font-bold hover:border-[#CE670E] hover:text-[#CE670E] hover:bg-[#CE670E]/5 active:scale-95 transition-all shadow-sm"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                </svg>
+                Rules
+            </Link>
 
             <div className="w-full max-w-[560px] rounded-[28px] p-8 sm:p-12 flex flex-col items-center relative z-10 transition-all duration-300">
 

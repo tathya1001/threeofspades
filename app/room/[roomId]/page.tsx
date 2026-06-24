@@ -22,7 +22,7 @@ interface RoomState {
     numPartners: number
     partnerThresholds: PartnerThreshold[]
     counter: number
-    phase: "waiting" | "bidding" | "trump-selection" | "playing"
+    phase: "waiting" | "pre-bidding" | "bidding" | "trump-selection" | "playing"
     highestBid: number
     highestBidderId: string | null
     highestBidderName: string | null
@@ -337,6 +337,7 @@ export default function Room() {
     const [cardOpacity, setCardOpacity] = useState(1.0)
     const [sidebarOpen, setSidebarOpen] = useState(false)
     const [isMobile, setIsMobile] = useState(false)
+    const [bidExtra, setBidExtra] = useState(0)
 
     // Mobile detection
     useEffect(() => {
@@ -414,7 +415,7 @@ export default function Room() {
     const effectiveMyId = myId || myIdRef.current || socket.id || ""
     const isHost = (!!effectiveMyId && effectiveMyId === room.hostId) || (!!myName && myName === room.hostName)
     const currentBidder = room.players[room.currentBidderIndex]
-    const isMyTurn = room.phase === "bidding" && currentBidder?.id === effectiveMyId
+    const isMyTurn = (room.phase === "bidding" || room.phase === "pre-bidding") && currentBidder?.id === effectiveMyId
     const iHaveForfeited = room.forfeited.includes(effectiveMyId)
     const isSelector = room.trumpSelectorId === effectiveMyId
     const atLeastOneBid = !!room.highestBidderId
@@ -460,14 +461,13 @@ export default function Room() {
     // ── Actions ────────────────────────────────────────────────────────────
     const giveCards = () => socket.emit("give-cards", roomId)
     const startBidding = () => socket.emit("start-bidding", roomId)
-    const isHostFirstTurn = isHost && !room.highestBidderId && room.currentBidderIndex === room.players.findIndex(p => p.id === effectiveMyId)
+    const passPrebid = () => socket.emit("pass-prebid", roomId)
+    const openBid = () => {
+        socket.emit("open-bid", { roomId, extra: bidExtra })
+        setBidExtra(0)
+    }
     const placeBid = (inc: number) => {
-        if (isHostFirstTurn) {
-            // Host's first turn: only place the base (minBid) amount, ignore increment
-            socket.emit("place-bid", { roomId, amount: room.minBid })
-        } else {
-            socket.emit("place-bid", { roomId, amount: room.highestBid + inc })
-        }
+        socket.emit("place-bid", { roomId, amount: room.highestBid + inc })
     }
     const forfeitBid = () => socket.emit("forfeit-bid", roomId)
 
@@ -632,9 +632,10 @@ export default function Room() {
                     <div className="text-[13px] text-[#8E8980] tracking-wider mb-0.5">room</div>
                     <div className="text-[22px] font-bold tracking-wide leading-tight">{roomId}</div>
                     <div className={`inline-block mt-1.5 text-[12px] tracking-[0.1em] uppercase rounded px-2 py-0.5 border ${room.phase === "waiting" ? "text-[#7A756E] border-[#D8D3C5] bg-[#FAF7F2]" :
-                        room.phase === "bidding" ? "text-blue-700 border-blue-300/40 bg-blue-50" :
-                            room.phase === "trump-selection" ? "text-orange-700 border-orange-300/40 bg-orange-50" :
-                                "text-green-700 border-green-300/40 bg-green-50"
+                        room.phase === "pre-bidding" ? "text-amber-700 border-amber-300/40 bg-amber-50" :
+                            room.phase === "bidding" ? "text-blue-700 border-blue-300/40 bg-blue-50" :
+                                room.phase === "trump-selection" ? "text-orange-700 border-orange-300/40 bg-orange-50" :
+                                    "text-green-700 border-green-300/40 bg-green-50"
                         }`}>{room.phase}</div>
                 </div>
 
@@ -761,6 +762,66 @@ export default function Room() {
                             </div>
                         )}
 
+                        {/* ══ PRE-BIDDING ═══════════════════════════════════════════ */}
+                        {room.phase === "pre-bidding" && (
+                            <div className="flex flex-col gap-3">
+                                <div>
+                                    <div className="text-[13px] text-[#8E8980]">opening bid</div>
+                                    <div className="text-3xl font-bold text-[#2D2A26]/40 leading-none">
+                                        {room.minBid + bidExtra}
+                                    </div>
+                                    <div className="text-[11px] text-[#8E8980]/70 mt-0.5">
+                                        base {room.minBid}{bidExtra > 0 ? ` + ${bidExtra}` : ""}
+                                    </div>
+                                </div>
+
+                                {isMyTurn ? (
+                                    <div className="flex flex-col gap-2.5">
+                                        {/* Extra amount selector */}
+                                        <div>
+                                            <div className="text-[12px] text-[#8E8980] mb-1.5">add to opening bid</div>
+                                            <div className="grid grid-cols-4 gap-1.5">
+                                                {[0, 5, 10, 15, 20, 25, 30, 50].map(n => (
+                                                    <button
+                                                        key={n}
+                                                        onClick={() => setBidExtra(n)}
+                                                        className={`py-1.5 rounded-lg border text-[13px] font-semibold transition-all cursor-pointer ${bidExtra === n
+                                                            ? "border-[#CE670E] text-[#CE670E] bg-[#CE670E]/10"
+                                                            : "border-[#D8D3C5] text-[#2D2A26] bg-[#FDFCFB] hover:bg-[#EBE7DC]"
+                                                            }`}
+                                                    >
+                                                        {n === 0 ? "—" : `+${n}`}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            onClick={openBid}
+                                            className="w-full py-3 border border-[#CE670E] rounded-lg text-white bg-[#CE670E] font-bold text-[1.1rem] hover:bg-[#0f2e57] hover:border-[#0f2e57] transition-all cursor-pointer shadow-sm"
+                                        >
+                                            Start Bid · {room.minBid + bidExtra}
+                                        </button>
+
+                                        <button
+                                            onClick={passPrebid}
+                                            className="w-full py-2.5 border border-[#D8D3C5] rounded-lg text-[#8E8980] font-bold text-[1rem] hover:bg-[#EBE7DC] hover:text-[#2D2A26] transition-all cursor-pointer"
+                                        >
+                                            Pass
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <p className="text-[#8E8980] text-base italic leading-relaxed">
+                                        waiting for{" "}
+                                        <span className="text-[#2D2A26] font-semibold">
+                                            {currentBidder?.name ?? "…"}
+                                        </span>
+                                        {" "}to open...
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
                         {/* ══ BIDDING ════════════════════════════════════════════════ */}
                         {room.phase === "bidding" && (
                             <div className="flex flex-col gap-3">
@@ -800,27 +861,18 @@ export default function Room() {
                                     <p className="text-[#8E8980] text-lg italic">you forfeited.</p>
                                 ) : (
                                     <div className="flex flex-col gap-2.5">
-                                        {isHostFirstTurn && isMyTurn ? (
-                                            <button
-                                                onClick={() => placeBid(0)}
-                                                className="w-full py-3 border border-[#CE670E]/40 rounded-lg text-[#CE670E] bg-[#CE670E]/5 text-xl font-bold hover:bg-[#CE670E]/10 transition-colors cursor-pointer"
-                                            >
-                                                Bid {room.minBid}
-                                            </button>
-                                        ) : (
-                                            <div className="grid grid-cols-2 gap-2">
-                                                {[5, 10, 15, 20].map(inc => (
-                                                    <button
-                                                        key={inc}
-                                                        onClick={() => placeBid(inc)}
-                                                        disabled={!isMyTurn}
-                                                        className="py-2.5 border border-[#D8D3C5] rounded-lg text-[#2D2A26] bg-[#FDFCFB] text-xl font-semibold hover:bg-[#EBE7DC] disabled:opacity-10 transition-colors cursor-pointer"
-                                                    >
-                                                        +{inc}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        )}
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {[5, 10, 15, 20].map(inc => (
+                                                <button
+                                                    key={inc}
+                                                    onClick={() => placeBid(inc)}
+                                                    disabled={!isMyTurn}
+                                                    className="py-2.5 border border-[#D8D3C5] rounded-lg text-[#2D2A26] bg-[#FDFCFB] text-xl font-semibold hover:bg-[#EBE7DC] disabled:opacity-10 transition-colors cursor-pointer"
+                                                >
+                                                    +{inc}
+                                                </button>
+                                            ))}
+                                        </div>
                                         <button
                                             onClick={forfeitBid}
                                             disabled={!canForfeit}
