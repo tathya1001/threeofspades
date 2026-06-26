@@ -5,13 +5,23 @@ An elegant, real-time multiplayer trick-taking card game based on the popular **
 ---
 
 ## Table of Contents
-1. [Architecture Design](#architecture-design)
-2. [Game Rules & Scoring System](#game-rules--scoring-system)
-3. [Key Features](#key-features)
-4. [Technology Stack](#technology-stack)
-5. [Socket.io Event API Protocol](#socketio-event-api-protocol)
-6. [Installation & Setup](#installation--setup)
-7. [Running Locally](#running-locally)
+1. [Screenshots](#screenshots)
+2. [Architecture Design](#architecture-design)
+3. [Game Rules & Scoring System](#game-rules--scoring-system)
+4. [Key Features](#key-features)
+5. [Technology Stack](#technology-stack)
+6. [Socket.io Event API Protocol](#socketio-event-api-protocol)
+7. [Installation & Setup](#installation--setup)
+8. [Running Locally](#running-locally)
+
+---
+
+## Screenshots
+
+![Home Page](public/screenshots/ss1.png)
+![Bidding Phase](public/screenshots/ss2.png)
+![Trump Selection Phase](public/screenshots/ss3.png)
+![Playing Screen](public/screenshots/ss4.png)
 
 ---
 
