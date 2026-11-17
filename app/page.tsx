@@ -1,355 +1,228 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import { socket } from "../lib/socket"
-import { useRouter } from "next/navigation"
+import { useState } from "react"
+import Image from "next/image"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { defaultMinBid, defaultPartnerThresholds, MAX_PLAYERS, MIN_CUSTOM_BID, MIN_PLAYERS, maxPoints as maxPointsFor } from "@/shared/game"
+import { ScrollingBackdrop } from "@/components/ScrollingBackdrop"
+import { useSlowConnection } from "@/components/ConnectionStatus"
+import { useClientValue } from "@/lib/hooks"
+import { clearNotice, useNotice } from "@/lib/notice"
+import { roomPath } from "@/lib/room"
+import { socket } from "@/lib/socket"
+import { readStorage, storageKeys } from "@/lib/storage"
 
-const MAX_N: Record<number, number> = { 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5, 9: 6, 10: 6 }
+type Screen = "menu" | "host" | "join"
+type GameMode = "standard" | "custom"
+type EditableThreshold = { partners: number; threshold: number; disabled: boolean }
+type CreateRoomReply = { ok: true; roomId: string } | { ok: false; error: string }
 
-function mround(value: number, multiple: number) {
-    return Math.floor(value / multiple + 0.5) * multiple
+const PLAYER_COUNTS = Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, (_, i) => MIN_PLAYERS + i)
+const DEFAULT_PLAYERS = 7
+// Generous, because a sleeping server can take most of a minute to wake up.
+const CREATE_TIMEOUT_MS = 60_000
+
+const editableThresholds = (players: number, decks: number): EditableThreshold[] =>
+    defaultPartnerThresholds(players, decks).map(t => ({ ...t, disabled: false }))
+
+const cleanRoomCode = (value: string) => value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 6)
+
+const backButton = "self-start flex items-center gap-2 text-[#8E8980] hover:text-[#CE670E] transition-all mb-6 text-[1.2rem] cursor-pointer group"
+const primaryButton = "w-full max-w-[340px] border border-[#CE670E] text-white bg-[#CE670E] rounded-[12px] py-4 text-[1.4rem] font-bold hover:bg-[#0f2e57] active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+const menuButton = "flex-1 py-4 px-5 rounded-[16px] border border-[#CE670E]/30 text-[#CE670E] bg-[#CE670E]/5 font-bold text-[1.35rem] hover:bg-[#CE670E]/10 hover:border-[#CE670E] active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer flex flex-col items-center justify-center gap-1 shadow-xs hover:shadow-md"
+const fieldLabel = "text-[1rem] text-[#8E8980] uppercase tracking-wider font-bold"
+
+function BackButton({ onClick }: { onClick: () => void }) {
+    return (
+        <button onClick={onClick} className={backButton}>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5 group-hover:-translate-x-1 transition-transform" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
+            </svg>
+            Back
+        </button>
+    )
 }
-
-function getDefaultThresholds(numPlayers: number, numDecks: number) {
-    const base = mround(250 / numPlayers, 10)
-    const maxN = MAX_N[numPlayers] ?? 3
-    const result: { partners: number; threshold: number; disabled: boolean }[] = []
-    for (let n = 2; n <= maxN; n++) {
-        result.push({
-            partners: n - 1,
-            threshold: numDecks === 2 ? (base * n + 30) * 2 : base * n + 30,
-            disabled: false,
-        })
-    }
-    return result
-}
-
-function getDefaultMinBid(numPlayers: number, numDecks: number) {
-    const thresholds = getDefaultThresholds(numPlayers, numDecks)
-    return thresholds[0]?.threshold ?? 90
-}
-
-// ─── Component ──────────────────────────────────────────────────────────────
 
 export default function Home() {
-    const [screen, setScreen] = useState<"menu" | "host" | "join">("menu")
-    const [name, setName] = useState("")
-    const [roomId, setRoomId] = useState("")
-    const [savedRoomId, setSavedRoomId] = useState<string | null>(null)
-    const [gameMode, setGameMode] = useState<"standard" | "custom">("standard")
+    const router = useRouter()
+    const notice = useNotice()
+    const { slow: serverSlow } = useSlowConnection()
 
-    // Standard mode state
-    const [numPlayers, setNumPlayers] = useState(7)
+    // Remembered values from the last visit, and a room code from an invite link.
+    const savedName = useClientValue(() => readStorage(storageKeys.lastName) ?? "", "")
+    const savedRoomId = useClientValue(() => readStorage(storageKeys.lastRoom), null)
+    const invitedRoomId = useClientValue(() => cleanRoomCode(new URLSearchParams(window.location.search).get("join") ?? ""), "")
+
+    const [screen, setScreen] = useState<Screen>("menu")
+    // null means "not edited yet", so the remembered value shows through.
+    const [nameDraft, setNameDraft] = useState<string | null>(null)
+    const [roomIdDraft, setRoomIdDraft] = useState<string | null>(null)
+    const name = nameDraft ?? savedName
+    const roomId = roomIdDraft ?? invitedRoomId
+    const trimmedName = name.trim()
+
+    const [gameMode, setGameMode] = useState<GameMode>("standard")
+    const [numPlayers, setNumPlayers] = useState(DEFAULT_PLAYERS)
     const [numDecks, setNumDecks] = useState(1)
 
-    // Custom mode state
-    const [customPlayers, setCustomPlayers] = useState(7)
+    const [customPlayers, setCustomPlayers] = useState(DEFAULT_PLAYERS)
     const [customDecks, setCustomDecks] = useState(1)
-    const [customMinBid, setCustomMinBid] = useState(110)
-    const [customThresholds, setCustomThresholds] = useState<
-        { partners: number; threshold: number; disabled: boolean }[]
-    >([])
+    const [customMinBid, setCustomMinBid] = useState(() => defaultMinBid(DEFAULT_PLAYERS, 1))
+    const [customThresholds, setCustomThresholds] = useState(() => editableThresholds(DEFAULT_PLAYERS, 1))
 
-    const router = useRouter()
+    const [creating, setCreating] = useState(false)
+    const [createError, setCreateError] = useState<string | null>(null)
 
-    // Load saved session from localStorage on mount
-    useEffect(() => {
-        try {
-            const savedName = localStorage.getItem("tos_last_name") ?? ""
-            const savedRoom = localStorage.getItem("tos_last_room_id") ?? ""
-            if (savedName) setName(savedName)
-            if (savedRoom) setSavedRoomId(savedRoom)
-        } catch { /* ignore */ }
-    }, [])
+    const customMaxPoints = maxPointsFor(customDecks)
+    const minBidOptions: number[] = []
+    for (let v = MIN_CUSTOM_BID; v <= customMaxPoints; v += 5) minBidOptions.push(v)
 
-    const maxPoints = customDecks === 2 ? 500 : 250
+    const changeCustomTable = (players: number, decks: number) => {
+        setCustomPlayers(players)
+        setCustomDecks(decks)
+        setCustomThresholds(editableThresholds(players, decks))
+        setCustomMinBid(defaultMinBid(players, decks))
+    }
 
-    // Regenerate thresholds when custom players or decks change
-    const regenerateThresholds = useCallback((players: number, decks: number) => {
-        const defaults = getDefaultThresholds(players, decks)
-        setCustomThresholds(defaults)
-        const defaultMinBid = getDefaultMinBid(players, decks)
-        setCustomMinBid(defaultMinBid)
-    }, [])
+    // A threshold can never sit below the minimum bid.
+    const changeCustomMinBid = (minBid: number) => {
+        setCustomMinBid(minBid)
+        setCustomThresholds(previous => previous.map(t => (t.threshold < minBid ? { ...t, threshold: minBid } : t)))
+    }
 
-    useEffect(() => {
-        if (gameMode === "custom") {
-            regenerateThresholds(customPlayers, customDecks)
-        }
-    }, [customPlayers, customDecks, gameMode, regenerateThresholds])
+    const updateThreshold = (index: number, threshold: number) => {
+        setCustomThresholds(previous => previous.map((t, i) => (i === index ? { ...t, threshold } : t)))
+    }
 
-    // Keep custom thresholds within valid customMinBid and maxPoints bounds
-    useEffect(() => {
-        setCustomThresholds(prev => {
-            let changed = false
-            const next = prev.map(t => {
-                let val = t.threshold
-                if (val < customMinBid) {
-                    val = customMinBid
-                    changed = true
-                }
-                if (val > maxPoints) {
-                    val = maxPoints
-                    changed = true
-                }
-                if (val !== t.threshold) {
-                    return { ...t, threshold: val }
-                }
+    // Disabling a partner level also disables every level above it.
+    const toggleThreshold = (index: number) => {
+        setCustomThresholds(previous => {
+            const disabling = !previous[index].disabled
+            return previous.map((t, i) => {
+                if (i === index) return { ...t, disabled: disabling }
+                if (disabling && i > index) return { ...t, disabled: true }
                 return t
             })
-            return changed ? next : prev
         })
-    }, [customMinBid, maxPoints])
+    }
+
+    const goTo = (path: string) => {
+        clearNotice()
+        router.push(path)
+    }
 
     const createRoom = () => {
-        if (gameMode === "standard") {
-            socket.emit("create-room", { name, numPlayers, numDecks }, (roomId: string) => {
-                router.push(`/room/${roomId}?name=${encodeURIComponent(name)}`)
-            })
-        } else {
-            socket.emit("create-room", {
-                name,
+        setCreating(true)
+        setCreateError(null)
+        clearNotice()
+
+        const payload = gameMode === "standard"
+            ? { name: trimmedName, numPlayers, numDecks }
+            : {
+                name: trimmedName,
                 numPlayers: customPlayers,
                 numDecks: customDecks,
                 isCustomRule: true,
                 customMinBid,
                 customPartnerThresholds: customThresholds,
-            }, (roomId: string) => {
-                router.push(`/room/${roomId}?name=${encodeURIComponent(name)}`)
-            })
-        }
-    }
-
-    const joinRoom = () => {
-        router.push(`/room/${roomId}?name=${name}`)
-    }
-
-    const updateThreshold = (idx: number, threshold: number) => {
-        setCustomThresholds(prev => {
-            const next = [...prev]
-            next[idx] = { ...next[idx], threshold }
-            return next
-        })
-    }
-
-    const toggleDisable = (idx: number) => {
-        setCustomThresholds(prev => {
-            const next = [...prev]
-            const newDisabled = !next[idx].disabled
-            // Cascading: if disabling, also disable all higher partner levels
-            if (newDisabled) {
-                for (let i = idx; i < next.length; i++) {
-                    next[i] = { ...next[i], disabled: true }
-                }
-            } else {
-                // Re-enable just this level (and all below it that were disabled by cascade)
-                next[idx] = { ...next[idx], disabled: false }
             }
-            return next
+
+        socket.timeout(CREATE_TIMEOUT_MS).emit("create-room", payload, (err: Error | null, reply?: CreateRoomReply) => {
+            setCreating(false)
+            if (err || !reply) {
+                setCreateError("Couldn't reach the game server. Check your connection and try again.")
+            } else if (!reply.ok) {
+                setCreateError(reply.error)
+            } else {
+                goTo(roomPath(reply.roomId, trimmedName))
+            }
         })
     }
 
-    // Generate min-bid dropdown options (step of 5, from 50 to maxPoints)
-    const minBidOptions: number[] = []
-    for (let v = 50; v <= maxPoints; v += 5) minBidOptions.push(v)
+    const banner = createError ?? notice
 
     return (
         <div className="min-h-screen bg-[#F3EFE6] text-[#2D2A26] flex items-center justify-center p-6 relative overflow-x-hidden overflow-y-auto">
-            <style>{`
-                @keyframes bg-scroll {
-                    0%   { background-position-x: 0; }
-                    100% { background-position-x: -1000px; }
-                }
-                .custom-select {
-                    appearance: none;
-                    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238E8980' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
-                    background-repeat: no-repeat;
-                    background-position: right 1rem center;
-                    background-size: 1.2em;
-                    background-color: #FDFCFB;
-                    border: 1px solid #D8D3C5;
-                    border-radius: 12px;
-                    padding: 10px 2.5rem 10px 1.25rem;
-                    color: #2D2A26;
-                    font-family: inherit;
-                    font-size: 1.15rem;
-                    cursor: pointer;
-                    outline: none;
-                    width: 100%;
-                    transition: all 0.2s ease;
-                }
-                .custom-select:focus {
-                    border-color: #CE670E;
-                }
-                .custom-select option {
-                    background: #F3EFE6;
-                    color: #2D2A26;
-                }
+            <ScrollingBackdrop />
 
-                input[type="range"] {
-                    -webkit-appearance: none;
-                    appearance: none;
-                    background: transparent;
-                    cursor: pointer;
-                    width: 100%;
-                    outline: none;
-                }
-
-                input[type="range"]:disabled {
-                    cursor: not-allowed;
-                }
-
-                input[type="range"]::-webkit-slider-runnable-track {
-                    background: #EBE7DC;
-                    height: 6px;
-                    border-radius: 3px;
-                    border: 1px solid #D8D3C5;
-                }
-
-                input[type="range"]:disabled::-webkit-slider-runnable-track {
-                    background: #F4F1EA;
-                    border-color: #EBE7DC;
-                }
-
-                input[type="range"]::-webkit-slider-thumb {
-                    -webkit-appearance: none;
-                    appearance: none;
-                    margin-top: -6px;
-                    background-color: #CE670E;
-                    height: 16px;
-                    width: 16px;
-                    border-radius: 50%;
-                    transition: transform 0.15s ease, background-color 0.15s ease;
-                }
-
-                input[type="range"]:disabled::-webkit-slider-thumb {
-                    background-color: #8E8980;
-                    box-shadow: none;
-                }
-
-                input[type="range"]:not(:disabled):hover::-webkit-slider-thumb {
-                    transform: scale(1.2);
-                    background-color: #0f2e57;
-                }
-
-                input[type="range"]::-moz-range-track {
-                    background: #EBE7DC;
-                    height: 6px;
-                    border-radius: 3px;
-                    border: 1px solid #D8D3C5;
-                }
-
-                input[type="range"]:disabled::-moz-range-track {
-                    background: #F4F1EA;
-                    border-color: #EBE7DC;
-                }
-
-                input[type="range"]::-moz-range-thumb {
-                    border: none;
-                    background-color: #CE670E;
-                    height: 16px;
-                    width: 16px;
-                    border-radius: 50%;
-                    transition: transform 0.15s ease, background-color 0.15s ease;
-                }
-
-                input[type="range"]:disabled::-moz-range-thumb {
-                    background-color: #8E8980;
-                }
-
-                input[type="range"]:not(:disabled):hover::-moz-range-thumb {
-                    transform: scale(1.2);
-                    background-color: #0f2e57;
-                }
-            `}</style>
-
-            {/* Background carousel */}
-            <div
-                style={{
-                    position: "absolute",
-                    inset: 0,
-                    backgroundImage: "url('/homebg.svg')",
-                    backgroundRepeat: "repeat-x",
-                    backgroundSize: "auto 100%",
-                    backgroundPosition: "center",
-                    animation: "bg-scroll 90s linear infinite",
-                    opacity: 0.025,
-                    pointerEvents: "none",
-                    zIndex: 0,
-                }}
-            />
-
-            {/* Rules button */}
             <Link
                 href="/rules"
                 className="fixed top-5 right-5 z-20 flex items-center gap-2 px-4 py-2 rounded-full border border-[#D8D3C5] bg-[#F3EFE6]/80 backdrop-blur-sm text-[#5C5751] text-[0.95rem] font-bold hover:border-[#CE670E] hover:text-[#CE670E] hover:bg-[#CE670E]/5 active:scale-95 transition-all shadow-sm"
             >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
                 </svg>
                 Rules
             </Link>
 
             <div className="w-full max-w-[560px] rounded-[28px] p-8 sm:p-12 flex flex-col items-center relative z-10 transition-all duration-300">
+                {banner && (
+                    <div role="alert" className="w-full max-w-[360px] mb-6 flex items-start gap-3 rounded-[12px] border border-red-500/30 bg-red-50 px-4 py-3 text-red-700 text-[1rem] leading-snug">
+                        <span className="flex-1">{banner}</span>
+                        <button
+                            onClick={() => {
+                                setCreateError(null)
+                                clearNotice()
+                            }}
+                            aria-label="Dismiss"
+                            className="text-red-700/60 hover:text-red-700 cursor-pointer"
+                        >
+                            ✕
+                        </button>
+                    </div>
+                )}
 
                 {screen === "menu" && (
                     <>
-
-                        {/* <h1 className="text-[3.6rem] text-[#2D2A26] font-bold mb-8 text-center tracking-wide leading-none">
-                            KINGS and <br /> REBELS
-                        </h1> */}
-                        <img
+                        <Image
                             src="/krlogo.svg"
-                            alt="Kings and Rebels Logo"
+                            alt="Kings and Rebels"
+                            width={460}
+                            height={204}
+                            preload
                             className="w-full max-w-[360px] h-auto mb-8 select-none"
                         />
 
-
-
                         <div className="w-full max-w-[360px] flex flex-col gap-2.5 mb-8">
-                            {/* <label className="text-[1.1rem] text-[#8E8980] uppercase tracking-widest text-center font-bold">
-                                Your Name
-                            </label> */}
                             <input
                                 className="w-full bg-[#F3EFE6] border border-[#D8D3C5] rounded-[12px] px-5 py-3.5 text-center text-[1.5rem] text-[#2D2A26] outline-none focus:border-[#CE670E] focus:ring-1 focus:ring-[#CE670E] transition-all placeholder:text-[#8E8980]/40 font-semibold"
                                 placeholder="Enter name"
+                                aria-label="Your name"
                                 value={name}
-                                onChange={(e) => setName(e.target.value)}
+                                onChange={e => setNameDraft(e.target.value)}
+                                onKeyDown={e => {
+                                    // Arriving from an invite link, Enter takes you straight to the table.
+                                    if (e.key === "Enter" && trimmedName && invitedRoomId) {
+                                        e.preventDefault()
+                                        goTo(roomPath(invitedRoomId, trimmedName))
+                                    }
+                                }}
                                 maxLength={15}
+                                autoComplete="nickname"
                             />
+                            {invitedRoomId && (
+                                <p className="text-center text-[#8E8980] text-[1rem]">
+                                    You&rsquo;ve been invited to room <span className="font-bold tracking-widest text-[#2D2A26]">{invitedRoomId}</span>
+                                </p>
+                            )}
                         </div>
-
-                        {/* <div className="text-[1.3rem] text-[#8E8980]/40 tracking-[0.25em] mb-8">
-                            • • •
-                        </div> */}
 
                         <div className="flex flex-col sm:flex-row gap-4 w-full max-w-[360px]">
-                            <button
-                                onClick={() => setScreen("host")}
-                                disabled={!name.trim()}
-                                className="flex-1 py-4 px-5 rounded-[16px] border border-[#CE670E]/30 text-[#CE670E] bg-[#CE670E]/5 font-bold text-[1.35rem] hover:bg-[#CE670E]/10 hover:border-[#CE670E] active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer flex flex-col items-center justify-center gap-1 shadow-xs hover:shadow-md"
-                            >
+                            <button onClick={() => setScreen("host")} disabled={!trimmedName} className={menuButton}>
                                 <span>Host Game</span>
-                                {/* <span className="text-[0.85rem] text-[#8E8980] font-normal tracking-wide">Create lobby</span> */}
                             </button>
-                            <button
-                                onClick={() => setScreen("join")}
-                                disabled={!name.trim()}
-                                className="flex-1 py-4 px-5 rounded-[16px] border border-[#CE670E]/30 text-[#CE670E] bg-[#CE670E]/5 font-bold text-[1.35rem] hover:bg-[#CE670E]/10 hover:border-[#CE670E] active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer flex flex-col items-center justify-center gap-1 shadow-xs hover:shadow-md"
-                            >
+                            <button onClick={() => setScreen("join")} disabled={!trimmedName} className={menuButton}>
                                 <span>Join Game</span>
-                                {/* <span className="text-[0.85rem] text-[#8E8980] font-normal tracking-wide">Enter code</span> */}
                             </button>
                         </div>
 
-                        {/* Rejoin last room button */}
-                        {savedRoomId && name.trim() && (
+                        {savedRoomId && trimmedName && !invitedRoomId && (
                             <button
-                                onClick={() => router.push(`/room/${savedRoomId}?name=${encodeURIComponent(name.trim())}`)}
-                                className="w-full max-w-[360px] flex items-center justify-center gap-2 py-3 px-5 rounded-[16px] border border-dashed border-[#CE670E]/40 text-[#CE670E]/70 text-[1.1rem] font-semibold hover:bg-[#CE670E]/5 hover:border-[#CE670E]/70 hover:text-[#CE670E] active:scale-95 transition-all cursor-pointer mt-1"
+                                onClick={() => goTo(roomPath(savedRoomId, trimmedName))}
+                                className="w-full max-w-[360px] flex items-center justify-center gap-2 py-3 px-5 rounded-[16px] border border-dashed border-[#CE670E]/40 text-[#CE670E]/70 text-[1.1rem] font-semibold hover:bg-[#CE670E]/5 hover:border-[#CE670E]/70 hover:text-[#CE670E] active:scale-95 transition-all cursor-pointer mt-4"
                             >
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 shrink-0">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 shrink-0" aria-hidden="true">
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
                                 </svg>
                                 Rejoin <span className="font-bold tracking-widest">{savedRoomId}</span>
@@ -358,69 +231,57 @@ export default function Home() {
                     </>
                 )}
 
-                {/* ═══ SCREEN 2: JOIN GAME ═══ */}
                 {screen === "join" && (
                     <>
-                        <button
-                            onClick={() => setScreen("menu")}
-                            className="self-start flex items-center gap-2 text-[#8E8980] hover:text-[#CE670E] transition-all mb-6 text-[1.2rem] cursor-pointer group"
+                        <BackButton onClick={() => setScreen("menu")} />
+
+                        <h2 className="text-[2.5rem] text-[#2D2A26] font-bold mb-8 text-center">Join Game</h2>
+
+                        <form
+                            className="w-full flex flex-col items-center"
+                            onSubmit={e => {
+                                e.preventDefault()
+                                if (roomId.length === 6 && trimmedName) goTo(roomPath(roomId, trimmedName))
+                            }}
                         >
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5 group-hover:-translate-x-1 transition-transform">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
-                            </svg>
-                            Back
-                        </button>
+                            <div className="w-full max-w-[340px] flex flex-col gap-2.5 mb-8">
+                                <label htmlFor="room-code" className="text-[1.1rem] text-[#8E8980] uppercase tracking-widest text-center font-bold">
+                                    Room Code
+                                </label>
+                                <input
+                                    id="room-code"
+                                    className="w-full bg-[#F3EFE6] border border-[#D8D3C5] rounded-[12px] px-5 py-3.5 text-center text-[1.7rem] tracking-[0.2em] text-[#2D2A26] outline-none focus:border-[#CE670E] focus:ring-1 focus:ring-[#CE670E] transition-all placeholder:text-[#8E8980]/30 font-bold uppercase"
+                                    placeholder="LOBBY"
+                                    value={roomId}
+                                    onChange={e => setRoomIdDraft(cleanRoomCode(e.target.value))}
+                                    maxLength={6}
+                                    autoComplete="off"
+                                    autoCapitalize="characters"
+                                    spellCheck={false}
+                                    autoFocus
+                                />
+                            </div>
 
-                        <h2 className="text-[2.5rem] text-[#2D2A26] font-bold mb-8 text-center">
-                            Join Game
-                        </h2>
-
-                        <div className="w-full max-w-[340px] flex flex-col gap-2.5 mb-8">
-                            <label className="text-[1.1rem] text-[#8E8980] uppercase tracking-widest text-center font-bold">
-                                Room Code
-                            </label>
-                            <input
-                                className="w-full bg-[#F3EFE6] border border-[#D8D3C5] rounded-[12px] px-5 py-3.5 text-center text-[1.7rem] tracking-[0.2em] text-[#2D2A26] outline-none focus:border-[#CE670E] focus:ring-1 focus:ring-[#CE670E] transition-all placeholder:text-[#8E8980]/30 font-bold uppercase"
-                                placeholder="LOBBY"
-                                value={roomId}
-                                onChange={(e) => setRoomId(e.target.value.toUpperCase().slice(0, 6))}
-                                maxLength={6}
-                            />
-                        </div>
-
-                        <button
-                            onClick={joinRoom}
-                            disabled={!roomId.trim() || !name.trim()}
-                            className="w-full max-w-[340px] border border-[#CE670E] text-white bg-[#CE670E] rounded-[12px] py-4 text-[1.4rem] font-bold hover:bg-[#0f2e57] active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer shadow-md hover:shadow-lg flex items-center justify-center gap-2"
-                        >
-                            <span>Join Game</span>
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
-                            </svg>
-                        </button>
+                            <button type="submit" disabled={roomId.length !== 6 || !trimmedName} className={primaryButton}>
+                                <span>Join Game</span>
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5" aria-hidden="true">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+                                </svg>
+                            </button>
+                        </form>
                     </>
                 )}
 
-                {/* ═══ SCREEN 3: HOST GAME ═══ */}
                 {screen === "host" && (
                     <>
-                        <button
-                            onClick={() => setScreen("menu")}
-                            className="self-start flex items-center gap-2 text-[#8E8980] hover:text-[#CE670E] transition-all mb-6 text-[1.2rem] cursor-pointer group"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5 group-hover:-translate-x-1 transition-transform">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
-                            </svg>
-                            Back
-                        </button>
+                        <BackButton onClick={() => setScreen("menu")} />
 
-                        <h2 className="text-[2.5rem] text-[#2D2A26] font-bold mb-6 text-center">
-                            Hosting Settings
-                        </h2>
+                        <h2 className="text-[2.5rem] text-[#2D2A26] font-bold mb-6 text-center">Hosting Settings</h2>
 
-                        <div className="flex gap-0 mb-8 w-full max-w-[340px]">
+                        <div className="flex gap-0 mb-8 w-full max-w-[340px]" role="group" aria-label="Rule set">
                             <button
                                 onClick={() => setGameMode("standard")}
+                                aria-pressed={gameMode === "standard"}
                                 className={`flex-1 py-2.5 text-[1.15rem] font-semibold rounded-l-[12px] border transition-all duration-200 cursor-pointer ${gameMode === "standard"
                                     ? "bg-[#EBE7DC] border-[#BCAE98] text-[#2D2A26]"
                                     : "bg-transparent border-[#E5E0D5] text-[#8E8980] hover:text-[#5C5751]"
@@ -430,6 +291,7 @@ export default function Home() {
                             </button>
                             <button
                                 onClick={() => setGameMode("custom")}
+                                aria-pressed={gameMode === "custom"}
                                 className={`flex-1 py-2.5 text-[1.15rem] font-semibold rounded-r-[12px] border border-l-0 transition-all duration-200 cursor-pointer ${gameMode === "custom"
                                     ? "bg-[#CE670E]/8 border-[#CE670E]/40 text-[#CE670E]"
                                     : "bg-transparent border-[#E5E0D5] text-[#8E8980] hover:text-[#5C5751]"
@@ -439,33 +301,22 @@ export default function Home() {
                             </button>
                         </div>
 
-                        {/* ═══ STANDARD MODE ═══ */}
                         {gameMode === "standard" && (
                             <div className="w-full max-w-[360px] flex flex-col gap-6 mb-8">
                                 <div className="flex flex-col gap-2">
-                                    <label className="text-[1.05rem] text-[#8E8980] uppercase tracking-wider font-bold">
+                                    <label htmlFor="players" className="text-[1.05rem] text-[#8E8980] uppercase tracking-wider font-bold">
                                         number of players
                                     </label>
-                                    <select
-                                        value={numPlayers}
-                                        onChange={(e) => setNumPlayers(Number(e.target.value))}
-                                        className="custom-select"
-                                    >
-                                        {[4, 5, 6, 7, 8, 9, 10].map(n => (
-                                            <option key={n} value={n}>{n} players</option>
-                                        ))}
+                                    <select id="players" value={numPlayers} onChange={e => setNumPlayers(Number(e.target.value))} className="custom-select">
+                                        {PLAYER_COUNTS.map(n => <option key={n} value={n}>{n} players</option>)}
                                     </select>
                                 </div>
 
                                 <div className="flex flex-col gap-2">
-                                    <label className="text-[1.05rem] text-[#8E8980] uppercase tracking-wider font-bold">
+                                    <label htmlFor="decks" className="text-[1.05rem] text-[#8E8980] uppercase tracking-wider font-bold">
                                         number of decks
                                     </label>
-                                    <select
-                                        value={numDecks}
-                                        onChange={(e) => setNumDecks(Number(e.target.value))}
-                                        className="custom-select"
-                                    >
+                                    <select id="decks" value={numDecks} onChange={e => setNumDecks(Number(e.target.value))} className="custom-select">
                                         <option value={1}>1 deck</option>
                                         <option value={2}>2 decks</option>
                                     </select>
@@ -473,29 +324,27 @@ export default function Home() {
                             </div>
                         )}
 
-                        {/* ═══ CUSTOM RULE MODE ═══ */}
                         {gameMode === "custom" && (
                             <div className="w-full flex flex-col gap-6 mb-8 text-[#2D2A26]">
-
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="flex flex-col gap-2">
-                                        <label className="text-[1rem] text-[#8E8980] uppercase tracking-wider font-bold">max players</label>
+                                        <label htmlFor="custom-players" className={fieldLabel}>max players</label>
                                         <select
+                                            id="custom-players"
                                             value={customPlayers}
-                                            onChange={(e) => setCustomPlayers(Number(e.target.value))}
+                                            onChange={e => changeCustomTable(Number(e.target.value), customDecks)}
                                             className="custom-select"
                                         >
-                                            {[4, 5, 6, 7, 8, 9, 10].map(n => (
-                                                <option key={n} value={n}>{n} players</option>
-                                            ))}
+                                            {PLAYER_COUNTS.map(n => <option key={n} value={n}>{n} players</option>)}
                                         </select>
                                     </div>
 
                                     <div className="flex flex-col gap-2">
-                                        <label className="text-[1rem] text-[#8E8980] uppercase tracking-wider font-bold">decks</label>
+                                        <label htmlFor="custom-decks" className={fieldLabel}>decks</label>
                                         <select
+                                            id="custom-decks"
                                             value={customDecks}
-                                            onChange={(e) => setCustomDecks(Number(e.target.value))}
+                                            onChange={e => changeCustomTable(customPlayers, Number(e.target.value))}
                                             className="custom-select"
                                         >
                                             <option value={1}>1 deck</option>
@@ -506,19 +355,18 @@ export default function Home() {
 
                                 <div className="flex items-center justify-between py-2.5 px-4 rounded-[12px] border border-[#E5E0D5] bg-[#F3EFE6]">
                                     <span className="text-[1.05rem] text-[#8E8980] uppercase tracking-wider font-bold">max points limit</span>
-                                    <span className="text-[1.3rem] font-bold text-[#CE670E]">{maxPoints} points</span>
+                                    <span className="text-[1.3rem] font-bold text-[#CE670E]">{customMaxPoints} points</span>
                                 </div>
 
                                 <div className="flex flex-col gap-2">
-                                    <label className="text-[1rem] text-[#8E8980] uppercase tracking-wider font-bold">minimum bidding points</label>
+                                    <label htmlFor="custom-min-bid" className={fieldLabel}>minimum bidding points</label>
                                     <select
+                                        id="custom-min-bid"
                                         value={customMinBid}
-                                        onChange={(e) => setCustomMinBid(Number(e.target.value))}
+                                        onChange={e => changeCustomMinBid(Number(e.target.value))}
                                         className="custom-select"
                                     >
-                                        {minBidOptions.map(v => (
-                                            <option key={v} value={v}>{v} points</option>
-                                        ))}
+                                        {minBidOptions.map(v => <option key={v} value={v}>{v} points</option>)}
                                     </select>
                                 </div>
 
@@ -529,7 +377,7 @@ export default function Home() {
                                         partner acquisition thresholds
                                     </span>
 
-                                    {customThresholds.map((t, idx) => (
+                                    {customThresholds.map((t, index) => (
                                         <div
                                             key={t.partners}
                                             className={`flex flex-col gap-2.5 p-4 rounded-[16px] border transition-all duration-200 ${t.disabled
@@ -541,9 +389,8 @@ export default function Home() {
                                                 <span className={`text-[1.15rem] font-bold ${t.disabled ? "text-[#8E8980]" : "text-[#2D2A26]"}`}>
                                                     {t.partners} Partner{t.partners > 1 ? "s" : ""}
                                                 </span>
-
                                                 <button
-                                                    onClick={() => toggleDisable(idx)}
+                                                    onClick={() => toggleThreshold(index)}
                                                     className={`text-[0.9rem] px-3.5 py-1.5 rounded-[8px] border font-bold transition-all duration-200 cursor-pointer ${t.disabled
                                                         ? "border-[#D8D3C5] text-[#2D2A26] bg-[#EBE7DC] hover:bg-[#E2DDCF]"
                                                         : "border-red-500/20 text-red-600 bg-red-500/5 hover:bg-red-500/10 hover:border-red-500"
@@ -557,12 +404,13 @@ export default function Home() {
                                                 <input
                                                     type="range"
                                                     min={customMinBid}
-                                                    max={maxPoints}
+                                                    max={customMaxPoints}
                                                     step={5}
                                                     value={t.threshold}
-                                                    onChange={(e) => updateThreshold(idx, Number(e.target.value))}
+                                                    onChange={e => updateThreshold(index, Number(e.target.value))}
                                                     disabled={t.disabled}
-                                                    className="flex-1"
+                                                    aria-label={`Bid needed for ${t.partners} partner${t.partners > 1 ? "s" : ""}`}
+                                                    className="threshold-slider flex-1"
                                                 />
                                                 <span className={`text-[1.2rem] font-bold min-w-[75px] text-right ${t.disabled ? "text-[#8E8980]" : "text-[#CE670E]"}`}>
                                                     {t.threshold} pts
@@ -571,28 +419,27 @@ export default function Home() {
                                         </div>
                                     ))}
 
-                                    {customThresholds.length === 0 && (
-                                        <div className="text-center text-[#8E8980]/50 text-[1rem] py-2">
-                                            select max players to configure
-                                        </div>
+                                    {customThresholds.every(t => t.disabled) && (
+                                        <p className="text-center text-[#8E8980] text-[1rem]">No partners: the winning bidder plays alone.</p>
                                     )}
                                 </div>
                             </div>
                         )}
 
-                        <button
-                            onClick={createRoom}
-                            disabled={!name.trim()}
-                            className="w-full max-w-[340px] border border-[#CE670E] text-white bg-[#CE670E] rounded-[12px] py-4 text-[1.4rem] font-bold hover:bg-[#0f2e57] active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer shadow-md hover:shadow-lg flex items-center justify-center gap-2 mt-2"
-                        >
-                            <span>Host Game</span>
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5">
+                        <button onClick={createRoom} disabled={!trimmedName || creating} className={`${primaryButton} mt-2`}>
+                            <span>{creating ? "Creating…" : "Host Game"}</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5" aria-hidden="true">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v6m3-3H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                             </svg>
                         </button>
                     </>
                 )}
 
+                {serverSlow && (
+                    <p role="status" className="mt-6 max-w-[360px] text-center text-[#8E8980] text-[0.95rem] leading-relaxed">
+                        Connecting to the game server… the first visit after a quiet spell can take up to a minute.
+                    </p>
+                )}
             </div>
         </div>
     )

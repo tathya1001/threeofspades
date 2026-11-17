@@ -1,7 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Akaya+Kanadaka&display=swap');
-
 @import "tailwindcss";
-
 
 :root {
   --background: #FAF7F2;
@@ -16,24 +13,249 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: 'Akaya Kanadaka', sans-serif;
+  font-family: var(--font-display), sans-serif;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
 }
 
-/* Safe area insets for notched phones */
-.safe-bottom {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+/* Decorative backdrop (home + rules) */
+
+@keyframes backdrop-scroll {
+  from { background-position-x: 0; }
+  to { background-position-x: -1000px; }
 }
 
-/* Prevent pull-to-refresh and overscroll on the game table */
-.no-overscroll {
-  overscroll-behavior: none;
-  touch-action: manipulation;
+.scrolling-backdrop {
+  background-image: url("/homebg.svg");
+  background-repeat: repeat-x;
+  background-size: auto 100%;
+  background-position: center;
+  animation: backdrop-scroll 90s linear infinite;
+  opacity: 0.025;
 }
 
-/* Prevent text selection on game elements */
-.no-select {
-  -webkit-user-select: none;
-  user-select: none;
+/* Game table animations */
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(20, 58, 108, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(20, 58, 108, 0); }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 1.6s ease-out infinite;
+}
+
+@keyframes deal-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-deal-in {
+  animation: deal-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scrolling-backdrop,
+  .animate-pulse-glow {
+    animation: none;
+  }
+}
+
+/* Home page: setup form controls */
+
+.custom-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238E8980' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 1rem center;
+  background-size: 1.2em;
+  background-color: #FDFCFB;
+  border: 1px solid #D8D3C5;
+  border-radius: 12px;
+  padding: 10px 2.5rem 10px 1.25rem;
+  color: #2D2A26;
+  font-family: inherit;
+  font-size: 1.15rem;
+  cursor: pointer;
+  outline: none;
+  width: 100%;
+  transition: all 0.2s ease;
+}
+
+.custom-select:focus {
+  border-color: #CE670E;
+}
+
+.custom-select option {
+  background: #F3EFE6;
+  color: #2D2A26;
+}
+
+.threshold-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+  outline: none;
+}
+
+.threshold-slider:disabled {
+  cursor: not-allowed;
+}
+
+.threshold-slider::-webkit-slider-runnable-track {
+  background: #EBE7DC;
+  height: 6px;
+  border-radius: 3px;
+  border: 1px solid #D8D3C5;
+}
+
+.threshold-slider:disabled::-webkit-slider-runnable-track {
+  background: #F4F1EA;
+  border-color: #EBE7DC;
+}
+
+.threshold-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -6px;
+  background-color: #CE670E;
+  height: 16px;
+  width: 16px;
+  border-radius: 50%;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.threshold-slider:disabled::-webkit-slider-thumb {
+  background-color: #8E8980;
+  box-shadow: none;
+}
+
+.threshold-slider:not(:disabled):hover::-webkit-slider-thumb {
+  transform: scale(1.2);
+  background-color: #0f2e57;
+}
+
+.threshold-slider::-moz-range-track {
+  background: #EBE7DC;
+  height: 6px;
+  border-radius: 3px;
+  border: 1px solid #D8D3C5;
+}
+
+.threshold-slider:disabled::-moz-range-track {
+  background: #F4F1EA;
+  border-color: #EBE7DC;
+}
+
+.threshold-slider::-moz-range-thumb {
+  border: none;
+  background-color: #CE670E;
+  height: 16px;
+  width: 16px;
+  border-radius: 50%;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.threshold-slider:disabled::-moz-range-thumb {
+  background-color: #8E8980;
+}
+
+.threshold-slider:not(:disabled):hover::-moz-range-thumb {
+  transform: scale(1.2);
+  background-color: #0f2e57;
+}
+
+/* Room: trump selection dropdowns */
+
+.card-select {
+  appearance: none;
+  background: #FDFCFB;
+  border: 1px solid #D8D3C5;
+  border-radius: 8px;
+  padding: 6px 8px;
+  color: #2D2A26;
+  font-family: inherit;
+  font-size: 14px;
+  width: 100%;
+  cursor: pointer;
+  outline: none;
+}
+
+.card-select:focus {
+  border-color: #CE670E;
+}
+
+.card-select option {
+  background: #FAF7F2;
+  color: #2D2A26;
+}
+
+/* Room: card opacity slider (rotated to stand upright) */
+
+.vertical-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+  outline: none;
+  transition: background 0.2s;
+}
+
+.vertical-slider:hover {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.vertical-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #CE670E;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(20, 58, 108, 0.3);
+  transition: transform 0.1s, background-color 0.1s;
+}
+
+.vertical-slider::-webkit-slider-thumb:hover {
+  background: #1E4E8A;
+  transform: scale(1.15);
+}
+
+.vertical-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: #CE670E;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(20, 58, 108, 0.3);
+  transition: transform 0.1s, background-color 0.1s;
+}
+
+.vertical-slider::-moz-range-thumb:hover {
+  background: #1E4E8A;
+  transform: scale(1.15);
+}
+
+/* Room: horizontal scrollbar under an oversized hand */
+
+.cards-scrollbar::-webkit-scrollbar {
+  height: 5px;
+}
+
+.cards-scrollbar::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 10px;
+}
+
+.cards-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(20, 58, 108, 0.15);
+  border-radius: 10px;
+}
+
+.cards-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(20, 58, 108, 0.3);
 }
