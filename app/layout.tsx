@@ -1,45 +1,43 @@
-import type { Metadata, Viewport } from "next";
-import { Akaya_Kanadaka, Yatra_One } from "next/font/google";
-import "./globals.css";
+import type { Metadata, Viewport } from "next"
+import { Yatra_One } from "next/font/google"
+import "./globals.css"
 
-const yatraOne = Yatra_One({
-  weight: "400",
-  subsets: ["latin"],
-  variable: "--font-yatraOne",
-});
+const displayFont = Yatra_One({
+    weight: "400",
+    subsets: ["latin"],
+    variable: "--font-display",
+})
 
-const akayaKanadaka = Akaya_Kanadaka({
-  weight: "400",
-  subsets: ["latin"],
-  variable: "--font-akaya",
-});
+const description = "A real-time multiplayer trick-taking card game of bold bids and secret partners."
 
 export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
-};
-
-export const metadata: Metadata = {
-  title: "Kings and Rebels",
-  description: "Kings and Rebels card game",
-};
-
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
-  return (
-    <html lang="en">
-      <body
-        className={`${yatraOne.variable} antialiased`}
-        style={{ fontFamily: "var(--font-yatraOne), sans-serif" }}
-      >
-        {children}
-      </body>
-    </html>
-  );
+    width: "device-width",
+    initialScale: 1,
+    // Keeps double-tap and pinch zoom from shifting the table mid-game on phones.
+    maximumScale: 1,
+    userScalable: false,
+    themeColor: "#F3EFE6",
 }
 
+export const metadata: Metadata = {
+    metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://3ofspades.vercel.app"),
+    title: {
+        default: "Kings and Rebels",
+        template: "%s · Kings and Rebels",
+    },
+    description,
+    openGraph: {
+        title: "Kings and Rebels",
+        description,
+        type: "website",
+        images: [{ url: "/screenshots/ss1.png", alt: "Kings and Rebels home screen" }],
+    },
+}
+
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+    return (
+        <html lang="en">
+            <body className={`${displayFont.variable} antialiased`}>{children}</body>
+        </html>
+    )
+}
